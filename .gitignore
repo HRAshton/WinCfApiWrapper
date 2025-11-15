@@ -1,0 +1,22 @@
+# .NET build and package output
+**/bin/
+**/obj/
+/artifacts/
+*.nupkg
+*.snupkg
+
+# Local IDE and user settings
+/.vs/
+/.idea/
+*.user
+*.suo
+*.rsuser
+*.sln.docstates
+
+# Test and coverage output
+**/TestResults/
+/coverage/
+*.coverage
+*.coveragexml
+*.trx
+
