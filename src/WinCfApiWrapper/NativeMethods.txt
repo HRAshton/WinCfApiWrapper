@@ -1,0 +1,9 @@
+CfRegisterSyncRoot
+CfUnregisterSyncRoot
+CfGetSyncRootInfoByPath
+CfCreatePlaceholders
+CfConnectSyncRoot
+CfDisconnectSyncRoot
+CfExecute
+CfGetPlaceholderInfo
+CF_PLACEHOLDER_BASIC_INFO

@@ -1,0 +1,7 @@
+<Solution>
+    <Folder Name="/tests/">
+        <Project Path="tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj" />
+        <Project Path="tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj" />
+    </Folder>
+    <Project Path="src/WinCfApiWrapper/WinCfApiWrapper.csproj" />
+</Solution>
