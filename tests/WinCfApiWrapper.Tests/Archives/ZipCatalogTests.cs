@@ -1,0 +1,89 @@
+using System.IO.Compression;
+using WinCfApiWrapper.Archives;
+using Xunit;
+
+namespace WinCfApiWrapper.Tests.Archives;
+
+public sealed class ZipCatalogTests
+{
+    [Fact]
+    public void Constructor_ValidArchive_IndexesFilesAndDirectories()
+    {
+        using MemoryStream stream = BuildArchive("dir/a.txt", "dir/nested/b.txt");
+        var catalog = new ZipCatalog(stream);
+        Assert.True(catalog.Contains("dir/a.txt"));
+        Assert.Contains(@"dir\nested", catalog.Directories);
+        Assert.Equal(2, catalog.Entries.Count);
+        Assert.Equal(64, catalog.Fingerprint.Length);
+    }
+
+    [Fact]
+    public void Constructor_ValidArchive_ReleasesIndexStreamBeforeReturning()
+    {
+        MemoryStream stream = BuildArchive("dir/a.txt");
+
+        var catalog = new ZipCatalog(stream);
+
+        Assert.False(stream.CanRead);
+        Assert.True(catalog.Contains("dir/a.txt"));
+    }
+
+    [Fact]
+    public void Constructor_DuplicateCaseInsensitivePath_Throws()
+    {
+        using MemoryStream stream = BuildArchive("a.txt", "A.txt");
+        Assert.Throws<InvalidDataException>(() => new ZipCatalog(stream));
+        Assert.False(stream.CanRead);
+    }
+
+    [Fact]
+    public void Constructor_FileConflictsWithDirectory_Throws()
+    {
+        using MemoryStream stream = BuildArchive("folder", "folder/file.txt");
+        Assert.Throws<InvalidDataException>(() => new ZipCatalog(stream));
+    }
+
+    [Fact]
+    public void Constructor_SameArchive_ProducesStableFingerprint()
+    {
+        byte[] bytes;
+        using (MemoryStream stream = BuildArchive("a.txt"))
+            bytes = stream.ToArray();
+
+        var first = new ZipCatalog(new MemoryStream(bytes));
+        var second = new ZipCatalog(new MemoryStream(bytes));
+        Assert.Equal(first.Fingerprint, second.Fingerprint);
+    }
+
+    [Fact]
+    public void Fingerprint_IncludesEmptyDirectories()
+    {
+        using MemoryStream firstStream = BuildArchive();
+        using var secondStream = new MemoryStream();
+        using (var archive = new ZipArchive(secondStream, ZipArchiveMode.Create, true))
+            archive.CreateEntry("empty/");
+
+        secondStream.Position = 0;
+
+        var first = new ZipCatalog(firstStream);
+        var second = new ZipCatalog(secondStream);
+        Assert.NotEqual(first.Fingerprint, second.Fingerprint);
+    }
+
+    private static MemoryStream BuildArchive(params string[] names)
+    {
+        var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, true))
+        {
+            foreach (string name in names)
+            {
+                using var writer = new StreamWriter(archive.CreateEntry(name).Open());
+                writer.Write("hello");
+            }
+        }
+
+        stream.Position = 0;
+
+        return stream;
+    }
+}
