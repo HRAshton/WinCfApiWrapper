@@ -16,6 +16,7 @@ $signer = "$repo/.github/workflows/attested-release-build.yml"
 $stageDir = Join-Path (Get-Location) "release-stage"
 $originalDir = Join-Path (Get-Location) "artifacts"
 $manifestName = "release-manifest.json"
+$provenanceExtension = ".intoto.jsonl"
 $nugetRoot = "https://api.nuget.org/v3-flatcontainer"
 
 function Invoke-Cli {
@@ -211,6 +212,60 @@ function Confirm-TagTarget {
     }
 }
 
+function Confirm-SignedProvenanceBundle {
+    param(
+        [string]$Path, [string[]]$Packages, [string]$Commit,
+        [scriptblock]$Verify = {
+            param($file, $bundle, $sourceCommit)
+            Invoke-Cli "gh" @("attestation", "verify", $file, "--bundle", $bundle,
+                "--repo", $repo, "--signer-workflow", $signer,
+                "--source-ref", "refs/heads/master", "--source-digest", $sourceCommit) | Out-Null
+        }
+    )
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Signed provenance bundle is missing." }
+    if ($Commit -cnotmatch '^[0-9a-f]{40}$') { throw "Invalid provenance source commit." }
+    $raw = (Get-Content -LiteralPath $Path -Raw).Trim()
+    if (-not $raw -or @($raw -split '\r?\n').Count -ne 1) {
+        throw "Provenance must be exactly one signed Sigstore JSON bundle."
+    }
+    try { $bundle = ConvertFrom-Json -InputObject $raw -ErrorAction Stop }
+    catch { throw "Malformed signed provenance JSON bundle: $_" }
+    if (-not $bundle.dsseEnvelope -or -not $bundle.verificationMaterial -or
+        -not $bundle.dsseEnvelope.payload -or
+        -not ($bundle.dsseEnvelope.signatures -is [array]) -or
+        $bundle.dsseEnvelope.signatures.Count -lt 1 -or
+        @($bundle.dsseEnvelope.signatures | Where-Object {
+            $null -eq $_ -or -not ($_.sig -is [string]) -or [string]::IsNullOrWhiteSpace($_.sig)
+        }).Count -gt 0) {
+        throw "Signed provenance is not a Sigstore DSSE bundle with signatures."
+    }
+    foreach ($file in $Packages) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Provenance subject is missing: $file" }
+        # The CLI validates signature, certificate identity, source commit, and
+        # this exact package digest; JSON shape alone is not trusted.
+        & $Verify $file $Path $Commit
+    }
+}
+
+function Test-MatchingSha256 {
+    param([string]$Path, [string]$Expected)
+    # Hex digests represent bytes, so letter casing does not affect equality.
+    return ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -eq $Expected)
+}
+
+function Test-CompleteReleaseStage {
+    param([string[]]$AssetNames, [string]$Version)
+    foreach ($required in @(
+        $manifestName,
+        "$packageId.$Version.nupkg",
+        "$packageId.$Version.snupkg",
+        "$packageId.$Version$provenanceExtension"
+    )) {
+        if ($required -notin $AssetNames) { return $false }
+    }
+    return $true
+}
+
 function Read-StagedManifest {
     $tag = $env:RELEASE_TAG
     $commit = $env:RELEASE_COMMIT
@@ -227,7 +282,8 @@ function Read-StagedManifest {
     $manifestPath = Join-Path $stageDir $manifestName
     if (-not (Test-Path $manifestPath)) { throw "Staged release $tag has no manifest." }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    if ($manifest.schema -ne 1 -or $manifest.repository -cne $repo -or
+    # Every staged release requires the schema-2 signed provenance asset.
+    if ($manifest.schema -ne 2 -or $manifest.repository -cne $repo -or
         $manifest.packageId -cne $packageId -or
         $manifest.version -cne $version -or $manifest.tag -cne $tag -or
         $manifest.commit -cne $commit -or @($manifest.packages).Count -ne 2) {
@@ -244,14 +300,27 @@ function Read-StagedManifest {
         }
         $path = Join-Path $stageDir $asset.name
         if (-not (Test-Path $path)) { throw "Cannot download staged $($asset.name)" }
-        $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
-        if ($actual -cne $asset.sha256) { throw "Staged asset SHA256 mismatch: $($asset.name)" }
+        if (-not (Test-MatchingSha256 -Path $path -Expected $asset.sha256)) { throw "Staged asset SHA256 mismatch: $($asset.name)" }
         Invoke-Cli "gh" @("attestation", "verify", $path, "--repo", $repo, "--signer-workflow", $signer, "--source-ref", "refs/heads/master", "--source-digest", $commit) | Out-Null
     }
     $nupkg = @($manifest.packages | Where-Object { $_.name.EndsWith(".nupkg") })[0]
     if ($nupkg.name -cne "$packageId.$version.nupkg") {
         throw "Staged NuGet package name does not match release version."
     }
+    $provenanceName = "$packageId.$version$provenanceExtension"
+    if (-not $manifest.provenance -or $manifest.provenance.name -cne $provenanceName -or
+        $manifest.provenance.sha256 -cnotmatch '^[0-9a-fA-F]{64}$' -or
+        $provenanceName -notin $assetNames) {
+        throw "Missing or unexpected signed provenance asset in staged manifest."
+    }
+    $provenanceFile = Join-Path $stageDir $provenanceName
+    if (-not (Test-Path -LiteralPath $provenanceFile -PathType Leaf) -or
+        -not (Test-MatchingSha256 -Path $provenanceFile -Expected $manifest.provenance.sha256)) {
+        throw "Signed provenance asset does not match the staged manifest."
+    }
+    $packageFiles = @($manifest.packages | ForEach-Object { Join-Path $stageDir $_.name })
+    Confirm-SignedProvenanceBundle -Path $provenanceFile -Packages $packageFiles -Commit $commit
+    Write-Host "Verified signed in-toto provenance for both release packages."
     Write-Host "Verified both original artifact SHA256 digests, tag commit, and attestations."
     return $manifest
 }
@@ -302,6 +371,13 @@ switch ($Phase) {
                         try { $writer.Write("signature") } finally { $writer.Dispose() }
                     }
                 } finally { $zip.Dispose() }
+            }
+            # Case-only digest differences are valid; distinct bytes are not.
+            $originalDigest = (Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash
+            if (-not (Test-MatchingSha256 -Path $original -Expected $originalDigest.ToLowerInvariant()) -or
+                -not (Test-MatchingSha256 -Path $original -Expected $originalDigest.ToUpperInvariant()) -or
+                (Test-MatchingSha256 -Path $signed -Expected $originalDigest)) {
+                throw "SHA256 comparison must ignore case without accepting different bytes."
             }
             Assert-SamePackagePayload -Original $original -Published $signed
             $rejected = $false
@@ -422,7 +498,84 @@ switch ($Phase) {
             } catch { $mismatchRejected = $true }
             if (-not $mismatchRejected) { throw "Mismatched published package was accepted." }
 
-            Write-Host "Release regression checks passed: payload integrity; tag creation and retries; stable version progression; expected lookup exits; NuGet publication polling."
+            # New schema-2 provenance must be well-formed, verified for both
+            # subjects, and rejected if missing, invalid, or unverifiable.
+            $provenance = Join-Path $tmp "mock.intoto.jsonl"
+            $validBundle = @{
+                mediaType = "application/vnd.dev.sigstore.bundle.v0.3+json"
+                dsseEnvelope = @{ payload = "Zm9v"; signatures = @(@{ sig = "dGVzdA==" }) }
+                verificationMaterial = @{ timestampVerificationData = @{ rfc3161Timestamps = @() } }
+            } | ConvertTo-Json -Compress -Depth 10
+            [IO.File]::WriteAllText($provenance, ($validBundle + [Environment]::NewLine))
+            $script:verifiedPackages = 0
+            $mockBundleVerify = { param($file, $bundle, $sha) $script:verifiedPackages++ }
+            Confirm-SignedProvenanceBundle -Path $provenance -Packages @($original, $signed) -Commit $expectedSha -Verify $mockBundleVerify
+            if ($script:verifiedPackages -ne 2) { throw "Provenance did not verify both packages." }
+
+            # Missing, null, empty, or malformed DSSE signatures must fail
+            # before running the cryptographic verification command.
+            $invalidBundles = @(
+                '{"dsseEnvelope":{"payload":"Zm9v"},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":null},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":[]},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":[null]},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":[{"sig":""}]},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":[{"sig":"   "}]},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":{"sig":"dGVzdA=="}},"verificationMaterial":{"x":1}}',
+                '{malformed json'
+            )
+            foreach ($invalidBundle in $invalidBundles) {
+                [IO.File]::WriteAllText($provenance, ($invalidBundle + [Environment]::NewLine))
+                $verifiedBefore = $script:verifiedPackages
+                $rejected = $false
+                try {
+                    Confirm-SignedProvenanceBundle -Path $provenance -Packages @($original) -Commit $expectedSha -Verify $mockBundleVerify
+                } catch { $rejected = $true }
+                if (-not $rejected -or $script:verifiedPackages -ne $verifiedBefore) {
+                    throw "Malformed or unsigned DSSE bundle passed shape validation."
+                }
+            }
+            [IO.File]::WriteAllText($provenance, ($validBundle + [Environment]::NewLine))
+            $invalidRejected = $false
+            [IO.File]::WriteAllText($provenance, ('{"unexpected":"not signed"}' + [Environment]::NewLine))
+            try {
+                Confirm-SignedProvenanceBundle -Path $provenance -Packages @($original) -Commit $expectedSha -Verify $mockBundleVerify
+            } catch { $invalidRejected = $true }
+            if (-not $invalidRejected) { throw "Unsigned provenance was accepted." }
+            [IO.File]::WriteAllText($provenance, ($validBundle + [Environment]::NewLine))
+            $badSignatureRejected = $false
+            try {
+                Confirm-SignedProvenanceBundle -Path $provenance -Packages @($original) -Commit $expectedSha -Verify {
+                    param($file, $bundle, $sha)
+                    throw "Signature verification failed."
+                }
+            } catch { $badSignatureRejected = $true }
+            if (-not $badSignatureRejected) { throw "Invalid provenance signature was accepted." }
+            $missingProvenanceRejected = $false
+            try {
+                Confirm-SignedProvenanceBundle -Path (Join-Path $tmp "missing.intoto.jsonl") -Packages @($original) -Commit $expectedSha -Verify $mockBundleVerify
+            } catch { $missingProvenanceRejected = $true }
+            if (-not $missingProvenanceRejected) { throw "Missing provenance was accepted." }
+
+            # Stage completeness must reject every missing asset, including
+            # the signed provenance bundle, so retries rebuild rather than skip.
+            $requiredAssets = @(
+                $manifestName,
+                "$packageId.0.2.0.nupkg",
+                "$packageId.0.2.0.snupkg",
+                "$packageId.0.2.0$provenanceExtension"
+            )
+            if (-not (Test-CompleteReleaseStage -AssetNames $requiredAssets -Version "0.2.0")) {
+                throw "Complete release stage was not detected."
+            }
+            foreach ($missing in $requiredAssets) {
+                $incomplete = @($requiredAssets | Where-Object { $_ -cne $missing })
+                if (Test-CompleteReleaseStage -AssetNames $incomplete -Version "0.2.0") {
+                    throw "Incomplete stage missing $missing was accepted."
+                }
+            }
+
+            Write-Host "Release regression checks passed: payload integrity; tag creation and retries; stable version progression; expected lookup exits; NuGet publication polling; signed provenance asset; stage completeness."
         } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
         break
     }
@@ -456,9 +609,7 @@ switch ($Phase) {
         }
         $release = Read-Release $tag
         $assetNames = if ($release) { @($release.assets | ForEach-Object { $_.name }) } else { @() }
-        $completeStage = ($manifestName -in $assetNames -and
-            "$packageId.$version.nupkg" -in $assetNames -and
-            "$packageId.$version.snupkg" -in $assetNames)
+        $completeStage = Test-CompleteReleaseStage -AssetNames $assetNames -Version $version
         $needsBuild = -not $completeStage
         if ($needsBuild) {
             # Even if a tag already exists, rebuilding is permitted ONLY
@@ -491,12 +642,15 @@ switch ($Phase) {
         foreach ($file in @($package, $symbols)) {
             if (-not (Test-Path $file)) { throw "Missing built artifact: $file" }
         }
+        $provenanceFile = Join-Path $originalDir "$packageId.$version$provenanceExtension"
+        # Validate the attestation before creating any remote tag or release.
+        Confirm-SignedProvenanceBundle -Path $provenanceFile -Packages @($package, $symbols) -Commit $commit
         $probe = Join-Path $env:RUNNER_TEMP "nuget-before-staging.nupkg"
         if (Read-NuGetPackage -Version $version -Destination $probe) {
             throw "NuGet version already published. Never replace staged artifacts after publication."
         }
         $manifest = [ordered]@{
-            schema = 1
+            schema = 2
             repository = $repo
             packageId = $packageId
             version = $version
@@ -506,6 +660,10 @@ switch ($Phase) {
                 @{ name = [IO.Path]::GetFileName($package); sha256 = (Get-FileHash $package -Algorithm SHA256).Hash }
                 @{ name = [IO.Path]::GetFileName($symbols); sha256 = (Get-FileHash $symbols -Algorithm SHA256).Hash }
             )
+            provenance = @{
+                name = [IO.Path]::GetFileName($provenanceFile)
+                sha256 = (Get-FileHash $provenanceFile -Algorithm SHA256).Hash
+            }
         }
         $manifestPath = Join-Path $originalDir $manifestName
         $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8
@@ -516,11 +674,11 @@ switch ($Phase) {
         if (-not $release) {
             Invoke-Cli "gh" @("release", "create", $tag, "--draft", "--verify-tag", "--target", $commit,
                 "--title", $tag, "--generate-notes", "--repo", $repo,
-                $package, $symbols, $manifestPath) | Out-Host
+                $package, $symbols, $provenanceFile, $manifestPath) | Out-Host
         } else {
             if (-not $release.isDraft) { throw "Cannot replace assets on a published release." }
             # Safe because the version does not exist on nuget.org.
-            Invoke-Cli "gh" @("release", "upload", $tag, $package, $symbols, $manifestPath,
+            Invoke-Cli "gh" @("release", "upload", $tag, $package, $symbols, $provenanceFile, $manifestPath,
                 "--clobber", "--repo", $repo) | Out-Host
         }
         Write-Host "Staged $tag and original attested bytes before NuGet push."
