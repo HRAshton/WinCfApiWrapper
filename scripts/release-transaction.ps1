@@ -242,6 +242,19 @@ function Confirm-SignedProvenanceBundle {
     }
 }
 
+function Test-CompleteReleaseStage {
+    param([string[]]$AssetNames, [string]$Version)
+    foreach ($required in @(
+        $manifestName,
+        "$packageId.$Version.nupkg",
+        "$packageId.$Version.snupkg",
+        "$packageId.$Version$provenanceExtension"
+    )) {
+        if ($required -notin $AssetNames) { return $false }
+    }
+    return $true
+}
+
 function Read-StagedManifest {
     $tag = $env:RELEASE_TAG
     $commit = $env:RELEASE_COMMIT
@@ -258,9 +271,8 @@ function Read-StagedManifest {
     $manifestPath = Join-Path $stageDir $manifestName
     if (-not (Test-Path $manifestPath)) { throw "Staged release $tag has no manifest." }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    # Schema 1 remains readable for existing staged v0.1.0 releases.
-    # New builds use schema 2 and require a signed provenance release asset.
-    if ($manifest.schema -notin @(1, 2) -or $manifest.repository -cne $repo -or
+    # Every staged release requires the schema-2 signed provenance asset.
+    if ($manifest.schema -ne 2 -or $manifest.repository -cne $repo -or
         $manifest.packageId -cne $packageId -or
         $manifest.version -cne $version -or $manifest.tag -cne $tag -or
         $manifest.commit -cne $commit -or @($manifest.packages).Count -ne 2) {
@@ -285,22 +297,20 @@ function Read-StagedManifest {
     if ($nupkg.name -cne "$packageId.$version.nupkg") {
         throw "Staged NuGet package name does not match release version."
     }
-    if ($manifest.schema -eq 2) {
-        $provenanceName = "$packageId.$version$provenanceExtension"
-        if (-not $manifest.provenance -or $manifest.provenance.name -cne $provenanceName -or
-            $manifest.provenance.sha256 -cnotmatch '^[0-9a-fA-F]{64}$' -or
-            $provenanceName -notin $assetNames) {
-            throw "Missing or unexpected signed provenance asset in staged manifest."
-        }
-        $provenanceFile = Join-Path $stageDir $provenanceName
-        if (-not (Test-Path -LiteralPath $provenanceFile -PathType Leaf) -or
-            (Get-FileHash -LiteralPath $provenanceFile -Algorithm SHA256).Hash -cne $manifest.provenance.sha256) {
-            throw "Signed provenance asset does not match the staged manifest."
-        }
-        $packageFiles = @($manifest.packages | ForEach-Object { Join-Path $stageDir $_.name })
-        Confirm-SignedProvenanceBundle -Path $provenanceFile -Packages $packageFiles -Commit $commit
-        Write-Host "Verified signed in-toto provenance for both release packages."
+    $provenanceName = "$packageId.$version$provenanceExtension"
+    if (-not $manifest.provenance -or $manifest.provenance.name -cne $provenanceName -or
+        $manifest.provenance.sha256 -cnotmatch '^[0-9a-fA-F]{64}$' -or
+        $provenanceName -notin $assetNames) {
+        throw "Missing or unexpected signed provenance asset in staged manifest."
     }
+    $provenanceFile = Join-Path $stageDir $provenanceName
+    if (-not (Test-Path -LiteralPath $provenanceFile -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $provenanceFile -Algorithm SHA256).Hash -cne $manifest.provenance.sha256) {
+        throw "Signed provenance asset does not match the staged manifest."
+    }
+    $packageFiles = @($manifest.packages | ForEach-Object { Join-Path $stageDir $_.name })
+    Confirm-SignedProvenanceBundle -Path $provenanceFile -Packages $packageFiles -Commit $commit
+    Write-Host "Verified signed in-toto provenance for both release packages."
     Write-Host "Verified both original artifact SHA256 digests, tag commit, and attestations."
     return $manifest
 }
@@ -505,7 +515,25 @@ switch ($Phase) {
             } catch { $missingProvenanceRejected = $true }
             if (-not $missingProvenanceRejected) { throw "Missing provenance was accepted." }
 
-            Write-Host "Release regression checks passed: payload integrity; tag creation and retries; stable version progression; expected lookup exits; NuGet publication polling; signed provenance asset."
+            # Stage completeness must reject every missing asset, including
+            # the signed provenance bundle, so retries rebuild rather than skip.
+            $requiredAssets = @(
+                $manifestName,
+                "$packageId.0.2.0.nupkg",
+                "$packageId.0.2.0.snupkg",
+                "$packageId.0.2.0$provenanceExtension"
+            )
+            if (-not (Test-CompleteReleaseStage -AssetNames $requiredAssets -Version "0.2.0")) {
+                throw "Complete release stage was not detected."
+            }
+            foreach ($missing in $requiredAssets) {
+                $incomplete = @($requiredAssets | Where-Object { $_ -cne $missing })
+                if (Test-CompleteReleaseStage -AssetNames $incomplete -Version "0.2.0") {
+                    throw "Incomplete stage missing $missing was accepted."
+                }
+            }
+
+            Write-Host "Release regression checks passed: payload integrity; tag creation and retries; stable version progression; expected lookup exits; NuGet publication polling; signed provenance asset; stage completeness."
         } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
         break
     }
@@ -539,9 +567,7 @@ switch ($Phase) {
         }
         $release = Read-Release $tag
         $assetNames = if ($release) { @($release.assets | ForEach-Object { $_.name }) } else { @() }
-        $completeStage = ($manifestName -in $assetNames -and
-            "$packageId.$version.nupkg" -in $assetNames -and
-            "$packageId.$version.snupkg" -in $assetNames)
+        $completeStage = Test-CompleteReleaseStage -AssetNames $assetNames -Version $version
         $needsBuild = -not $completeStage
         if ($needsBuild) {
             # Even if a tag already exists, rebuilding is permitted ONLY
