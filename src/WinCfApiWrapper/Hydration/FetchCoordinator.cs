@@ -115,8 +115,7 @@ internal sealed class FetchCoordinator : IAsyncDisposable
                 parameters->FetchData.RequiredLength,
                 name
             );
-            bool added =
-                Volatile.Read(ref _stopping) == 0 && _requests.TryAdd(request, 0);
+            bool added = Volatile.Read(ref _stopping) == 0 && _requests.TryAdd(request, 0);
             switch (added)
             {
                 case true when _channel.Writer.TryWrite(request):

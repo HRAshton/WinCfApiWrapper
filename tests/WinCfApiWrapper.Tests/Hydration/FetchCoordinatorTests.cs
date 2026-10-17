@@ -38,7 +38,9 @@ public sealed class FetchCoordinatorTests : IDisposable
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
         var calls = new List<TransferCall>();
         var errors = new List<Exception>();
-        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completed = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
         FetchCoordinator? coordinator = null;
         var transfer = new NativeTransfer(
             (_, call) =>
