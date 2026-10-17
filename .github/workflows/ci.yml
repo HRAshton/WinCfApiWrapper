@@ -48,6 +48,7 @@ jobs:
             10.0.x
 
       - name: Validate release recovery script syntax
+        if: matrix.framework == 'net8.0-windows'
         shell: pwsh
         run: |
           $tokens = $null
@@ -62,10 +63,12 @@ jobs:
           }
 
       - name: Test release retry package integrity checks
+        if: matrix.framework == 'net8.0-windows'
         shell: pwsh
         run: ./scripts/release-transaction.ps1 -Phase SelfTest
 
       - name: Validate GitVersion configuration
+        if: matrix.framework == 'net8.0-windows'
         shell: pwsh
         run: |
           dotnet tool install --global GitVersion.Tool --version 6.8.2
