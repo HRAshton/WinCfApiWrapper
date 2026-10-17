@@ -71,6 +71,12 @@ jobs:
             throw "GitVersion failed to produce valid SemVer"
           }
           Write-Host "GitVersion SemVer: $semver"
+          $stable = (& dotnet-gitversion /showvariable MajorMinorPatch /config GitVersion.yml 2>&1 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $stable -notmatch '^\d+\.\d+\.\d+$') {
+            Write-Host $stable
+            throw "GitVersion did not produce a stable MajorMinorPatch candidate"
+          }
+          Write-Host "GitVersion release candidate: $stable"
 
       - name: Restore unit tests and library
         run: dotnet restore tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj

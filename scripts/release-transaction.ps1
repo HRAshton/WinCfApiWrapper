@@ -232,6 +232,27 @@ function Read-StagedManifest {
     return $manifest
 }
 
+function Assert-NextReleaseVersion {
+    param([string]$Candidate, [string]$PreviousTag)
+    if ($Candidate -cnotmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+        throw "GitVersion did not produce a stable MajorMinorPatch version: $Candidate"
+    }
+    if ($PreviousTag) {
+        if ($PreviousTag -cnotmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            throw "Invalid previous release tag: $PreviousTag"
+        }
+        if ([version]$Candidate -le [version]$PreviousTag.Substring(1)) {
+            throw "GitVersion $Candidate does not advance beyond latest release $PreviousTag."
+        }
+    }
+    return $Candidate
+}
+
+function Test-ResumeRelease {
+    param([string]$LastCommit, [string]$Head, [object]$Release)
+    return ($LastCommit -eq $Head -or $null -eq $Release -or [bool]$Release.isDraft)
+}
+
 switch ($Phase) {
     "SelfTest" {
         # Local regression checks; no GH or NuGet credentials/network required.
@@ -302,7 +323,31 @@ switch ($Phase) {
             } catch { $missingRejected = $true }
             if (-not $missingRejected) { throw "Missing tag was not detected after creation." }
 
-            Write-Host "Release regression checks passed: payload integrity; tag creation, retries and conflict rejection."
+            if ((Assert-NextReleaseVersion -Candidate "0.1.0") -ne "0.1.0" -or
+                (Assert-NextReleaseVersion -Candidate "0.1.1" -PreviousTag "v0.1.0") -ne "0.1.1" -or
+                (Assert-NextReleaseVersion -Candidate "0.2.0" -PreviousTag "v0.1.1") -ne "0.2.0") {
+                throw "First or subsequent stable release selection failed."
+            }
+            foreach ($candidate in @("0.1.0-1", "0.1.0+build", "0.1", "1.0.0.0")) {
+                $rejected = $false
+                try { $null = Assert-NextReleaseVersion -Candidate $candidate } catch { $rejected = $true }
+                if (-not $rejected) { throw "Invalid candidate $candidate was accepted." }
+            }
+            foreach ($candidate in @("0.1.0", "0.0.9")) {
+                $rejected = $false
+                try {
+                    $null = Assert-NextReleaseVersion -Candidate $candidate -PreviousTag "v0.1.0"
+                } catch { $rejected = $true }
+                if (-not $rejected) { throw "Non-advancing candidate $candidate was accepted." }
+            }
+            if (-not (Test-ResumeRelease -LastCommit $expectedSha -Head $expectedSha -Release ([pscustomobject]@{ isDraft = $false })) -or
+                -not (Test-ResumeRelease -LastCommit $expectedSha -Head ("b" * 40) -Release ([pscustomobject]@{ isDraft = $true })) -or
+                -not (Test-ResumeRelease -LastCommit $expectedSha -Head ("b" * 40) -Release $null) -or
+                (Test-ResumeRelease -LastCommit $expectedSha -Head ("b" * 40) -Release ([pscustomobject]@{ isDraft = $false }))) {
+                throw "Release retry or no-change-week selection failed."
+            }
+
+            Write-Host "Release regression checks passed: payload integrity; tag creation and retries; stable version progression."
         } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
         break
     }
@@ -320,7 +365,7 @@ switch ($Phase) {
             if ($LASTEXITCODE -ne 0) { throw "Latest release tag is not an ancestor of master." }
             $release = Read-Release $lastTag
             # Unfinished previous releases take priority even when master advanced.
-            $resume = ($lastCommit -eq $head -or -not $release -or $release.isDraft)
+            $resume = Test-ResumeRelease -LastCommit $lastCommit -Head $head -Release $release
         }
         if ($resume) {
             $tag = $lastTag
@@ -329,8 +374,8 @@ switch ($Phase) {
         } else {
             $commit = $head
             Invoke-Cli "dotnet" @("tool", "install", "--global", "GitVersion.Tool", "--version", "6.8.2") | Out-Host
-            $version = (Invoke-Cli "dotnet-gitversion" @("/showvariable", "SemVer", "/config", "GitVersion.yml")).Trim()
-            if ($version -cnotmatch '^\d+\.\d+\.\d+$') { throw "GitVersion did not produce stable SemVer: $version" }
+            $candidate = (Invoke-Cli "dotnet-gitversion" @("/showvariable", "MajorMinorPatch", "/config", "GitVersion.yml")).Trim()
+            $version = Assert-NextReleaseVersion -Candidate $candidate -PreviousTag $lastTag
             $tag = "v$version"
             if ((& git tag --list $tag) -contains $tag) { throw "Version tag already exists: $tag" }
         }
