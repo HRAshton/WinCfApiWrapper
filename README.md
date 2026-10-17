@@ -3,6 +3,7 @@
 [![CI](https://github.com/HRAshton/WinCfApiWrapper/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/HRAshton/WinCfApiWrapper/actions/workflows/ci.yml)
 [![Codecov coverage](https://codecov.io/gh/HRAshton/WinCfApiWrapper/branch/master/graph/badge.svg?flag=unittests)](https://app.codecov.io/gh/HRAshton/WinCfApiWrapper)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/HRAshton/WinCfApiWrapper/badge)](https://scorecard.dev/viewer/?uri=github.com/HRAshton/WinCfApiWrapper)
+[![REUSE status](https://api.reuse.software/badge/github.com/HRAshton/WinCfApiWrapper)](https://api.reuse.software/info/github.com/HRAshton/WinCfApiWrapper)
 [![SLSA provenance](https://img.shields.io/badge/SLSA%20provenance-verified-2ea44f)](https://github.com/HRAshton/WinCfApiWrapper/actions/runs/39067209522)
 [![NuGet](https://img.shields.io/nuget/v/WinCfApiWrapper)](https://www.nuget.org/packages/WinCfApiWrapper)
 [![NuGet downloads](https://img.shields.io/nuget/dt/WinCfApiWrapper)](https://www.nuget.org/packages/WinCfApiWrapper)
