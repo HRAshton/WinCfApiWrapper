@@ -86,11 +86,8 @@ function Read-ZipContentHashes {
     } finally { $zip.Dispose() }
 }
 
-function Confirm-SignedNuGetPackage {
+function Assert-SamePackagePayload {
     param([string]$Original, [string]$Published)
-    # nuget.org adds only .signature.p7s to unsigned packages.
-    # Compare every other uncompressed ZIP entry by name and SHA256.
-    Invoke-Cli "dotnet" @("nuget", "verify", $Published, "--all") | Out-Host
     $orig = Read-ZipContentHashes $Original
     $remote = Read-ZipContentHashes $Published
     if ($orig.Count -ne $remote.Count) { throw "Published NuGet package has different ZIP entries." }
@@ -99,6 +96,14 @@ function Confirm-SignedNuGetPackage {
             throw "NuGet package content mismatch for entry '$name'. Manual investigation required."
         }
     }
+}
+
+function Confirm-SignedNuGetPackage {
+    param([string]$Original, [string]$Published)
+    # nuget.org adds only .signature.p7s to unsigned packages.
+    # Compare every other uncompressed ZIP entry by name and SHA256.
+    Invoke-Cli "dotnet" @("nuget", "verify", $Published, "--all") | Out-Host
+    Assert-SamePackagePayload -Original $Original -Published $Published
     $zip = [System.IO.Compression.ZipFile]::OpenRead($Published)
     try {
         if (-not $zip.GetEntry(".signature.p7s")) {
@@ -168,7 +173,7 @@ function Read-StagedManifest {
         if (-not (Test-Path $path)) { throw "Cannot download staged $($asset.name)" }
         $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
         if ($actual -cne $asset.sha256) { throw "Staged asset SHA256 mismatch: $($asset.name)" }
-        Invoke-Cli "gh" @("attestation", "verify", $path, "--repo", $repo, "--signer-workflow", $signer, "--source-ref", "refs/heads/master") | Out-Null
+        Invoke-Cli "gh" @("attestation", "verify", $path, "--repo", $repo, "--signer-workflow", $signer, "--source-ref", "refs/heads/master", "--source-digest", $commit) | Out-Null
     }
     $nupkg = @($manifest.packages | Where-Object { $_.name.EndsWith(".nupkg") })[0]
     if ($nupkg.name -cne "$packageId.$version.nupkg") {
@@ -179,7 +184,40 @@ function Read-StagedManifest {
 }
 
 switch ($Phase) {
-    "SyntaxCheck" { Write-Host "PowerShell release transaction script parsed successfully."; break }
+    "SelfTest" {
+        # Local regression checks; no GH or NuGet credentials/network required.
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) ("WinCfRelease-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $tmp | Out-Null
+        try {
+            $original = Join-Path $tmp "original.nupkg"
+            $signed = Join-Path $tmp "signed.nupkg"
+            $tampered = Join-Path $tmp "tampered.nupkg"
+            foreach ($item in @(
+                @{ path = $original; payload = "matching" ; signed = $false },
+                @{ path = $signed; payload = "matching"; signed = $true },
+                @{ path = $tampered; payload = "tampered"; signed = $true }
+            )) {
+                $zip = [IO.Compression.ZipFile]::Open($item.path, [IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    $entry = $zip.CreateEntry("lib/net8.0-windows/payload.bin")
+                    $writer = [IO.StreamWriter]::new($entry.Open())
+                    try { $writer.Write($item.payload) } finally { $writer.Dispose() }
+                    if ($item.signed) {
+                        $entry = $zip.CreateEntry(".signature.p7s")
+                        $writer = [IO.StreamWriter]::new($entry.Open())
+                        try { $writer.Write("signature") } finally { $writer.Dispose() }
+                    }
+                } finally { $zip.Dispose() }
+            }
+            Assert-SamePackagePayload -Original $original -Published $signed
+            $rejected = $false
+            try { Assert-SamePackagePayload -Original $original -Published $tampered } catch { $rejected = $true }
+            if (-not $rejected) { throw "Content mismatch was not rejected." }
+            Write-Host "Release regression checks passed: signature-only change accepted, payload modification rejected."
+        } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+        break
+    }
+
 
     "Resolve" {
         $head = Invoke-Cli "git" @("rev-parse", "HEAD")
