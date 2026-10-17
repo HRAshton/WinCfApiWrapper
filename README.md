@@ -6,7 +6,6 @@
 [![REUSE status](https://api.reuse.software/badge/github.com/HRAshton/WinCfApiWrapper)](https://api.reuse.software/info/github.com/HRAshton/WinCfApiWrapper)
 [![SLSA provenance](https://img.shields.io/badge/SLSA%20provenance-verified-2ea44f)](https://github.com/HRAshton/WinCfApiWrapper/actions/runs/39067209522)
 [![NuGet](https://img.shields.io/nuget/v/WinCfApiWrapper)](https://www.nuget.org/packages/WinCfApiWrapper)
-[![NuGet downloads](https://img.shields.io/nuget/dt/WinCfApiWrapper)](https://www.nuget.org/packages/WinCfApiWrapper)
 [![0BSD License](https://img.shields.io/badge/license-0BSD-blue)](LICENSE)
 ![.NET 8+](https://img.shields.io/badge/.NET-8%2B-512BD4)
 ![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D6)
