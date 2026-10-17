@@ -16,7 +16,9 @@ Check out PR #1 locally and run with [GitHub CLI](https://cli.github.com/) and P
 
 ```powershell
 gh auth login
-gh pr checkout 1 -R HRAshton/WinCfApiWrapper
+gh repo clone HRAshton/WinCfApiWrapper
+cd WinCfApiWrapper
+gh pr checkout 1
 pwsh -File scripts/setup-github.ps1 -NuGetUser YOUR_NUGET_ORG_USERNAME
 ```
 
