@@ -24,23 +24,41 @@ $allRules = ConvertFrom-Json -InputObject (
     (Invoke-Gh -Arguments @("api", "repos/$repository/rulesets")) -join "`n"
 )
 $masterRules = @($allRules | Where-Object {
-    $_.name -eq "master: require PR and Windows CI" -and $_.target -eq "branch"
+    $_.target -eq "branch" -and (
+        "~DEFAULT_BRANCH" -in @($_.conditions.ref_name.include) -or
+        "refs/heads/master" -in @($_.conditions.ref_name.include)
+    )
 })
 $masterConfig = Join-Path $rulesRoot "master.json"
 if ($masterRules.Count -gt 1) {
-    throw "More than one matching master ruleset was found."
+    throw "Multiple rulesets govern master. Inspect them manually; no duplicate created."
 }
 if ($masterRules.Count -eq 1) {
     $ruleId = $masterRules[0].id
-    $null = Invoke-Gh -Arguments @("api", "--method", "PUT",
-        "repos/$repository/rulesets/$ruleId", "--input", $masterConfig)
-    Write-Host "Updated master ruleset #$ruleId"
+    $master = ConvertFrom-Json -InputObject (
+        (Invoke-Gh -Arguments @("api", "repos/$repository/rulesets/$ruleId")) -join "`n"
+    )
+    $types = @($master.rules | ForEach-Object { $_.type })
+    $requiredRules = @("pull_request", "required_status_checks", "deletion", "non_fast_forward")
+    $missing = @($requiredRules | Where-Object { $_ -notin $types })
+    $pr = @($master.rules | Where-Object { $_.type -eq "pull_request" }) | Select-Object -First 1
+    $checks = @($master.rules | Where-Object { $_.type -eq "required_status_checks" }) |
+        Select-Object -First 1
+    $contexts = @($checks.parameters.required_status_checks | ForEach-Object { $_.context })
+    if ($master.enforcement -ne "active" -or $missing.Count -gt 0 -or
+        "Build and unit tests (Windows)" -notin $contexts -or
+        $pr.parameters.required_approving_review_count -ne 0) {
+        throw "Existing master ruleset lacks required protections or blocks zero-review Renovate automerge."
+    }
+    Write-Host "Verified active master ruleset #$ruleId; leaving existing settings unchanged"
+    if ("code_quality" -in $types -or "code_coverage" -in $types) {
+        Write-Warning "Existing master ruleset includes Code Quality / coverage thresholds. Confirm their workflows and coverage uploads run before merging."
+    }
 } else {
     $null = Invoke-Gh -Arguments @("api", "--method", "POST",
         "repos/$repository/rulesets", "--input", $masterConfig)
     Write-Host "Created master ruleset"
 }
-
 # An existing v* ruleset should not be replaced merely to add automation.
 # Validate the required safeguards, creating it only if absent.
 $allRules = ConvertFrom-Json -InputObject (
