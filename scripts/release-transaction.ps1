@@ -120,16 +120,34 @@ function Confirm-SignedNuGetPackage {
 }
 
 function Confirm-NuGetState {
-    param([string]$Version, [string]$Original, [int]$Attempts = 1)
+    param(
+        [string]$Version,
+        [string]$Original,
+        [ValidateRange(1, 360)][int]$Attempts = 1,
+        [ValidateRange(0, 600)][int]$RetryDelaySeconds = 10,
+        [scriptblock]$Fetch = {
+            param($v, $destination)
+            Read-NuGetPackage -Version $v -Destination $destination
+        },
+        [scriptblock]$Verify = {
+            param($original, $published)
+            Confirm-SignedNuGetPackage -Original $original -Published $published
+        }
+    )
     New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
     $downloaded = Join-Path $stageDir "nuget-signed.nupkg"
     for ($i = 1; $i -le $Attempts; $i++) {
         if (Test-Path $downloaded) { Remove-Item -LiteralPath $downloaded -Force }
-        if (Read-NuGetPackage -Version $Version -Destination $downloaded) {
-            Confirm-SignedNuGetPackage -Original $Original -Published $downloaded
+        if (& $Fetch $Version $downloaded) {
+            & $Verify $Original $downloaded
             return $true
         }
-        if ($i -lt $Attempts) { Start-Sleep -Seconds 10 }
+        if ($i -lt $Attempts) {
+            if ($i -eq 1 -or $i % 6 -eq 0) {
+                Write-Host "NuGet $Version is not indexed yet (attempt $i/$Attempts); waiting for validation."
+            }
+            if ($RetryDelaySeconds -gt 0) { Start-Sleep -Seconds $RetryDelaySeconds }
+        }
     }
     return $false
 }
@@ -369,7 +387,42 @@ switch ($Phase) {
             if (-not $unexpectedRejected) { throw 'Unexpected API failure was ignored.' }
             $global:LASTEXITCODE = 0
 
-            Write-Host "Release regression checks passed: payload integrity; tag creation and retries; stable version progression; expected lookup exits."
+            # Indexed package detection after delayed publication must stop polling
+            # immediately, and verifier failures must never be accepted as success.
+            $script:nugetPolls = 0
+            $script:nugetVerifications = 0
+            $mockFetch = {
+                param($v, $destination)
+                $script:nugetPolls++
+                return $script:nugetPolls -ge 3
+            }
+            $mockVerify = {
+                param($orig, $published)
+                $script:nugetVerifications++
+            }
+            $found = Confirm-NuGetState -Version "0.1.0" -Original $original -Attempts 5 -RetryDelaySeconds 0 -Fetch $mockFetch -Verify $mockVerify
+            if (-not $found -or $script:nugetPolls -ne 3 -or $script:nugetVerifications -ne 1) {
+                throw "Delayed NuGet indexing was not verified correctly."
+            }
+
+            $script:nugetPolls = 0
+            $script:nugetVerifications = 0
+            $found = Confirm-NuGetState -Version "0.1.0" -Original $original -Attempts 2 -RetryDelaySeconds 0 -Fetch $mockFetch -Verify $mockVerify
+            if ($found -or $script:nugetPolls -ne 2 -or $script:nugetVerifications -ne 0) {
+                throw "NuGet availability timeout was not respected."
+            }
+
+            $script:nugetPolls = 0
+            $mismatchRejected = $false
+            try {
+                $null = Confirm-NuGetState -Version "0.1.0" -Original $original -Attempts 5 -RetryDelaySeconds 0 -Fetch $mockFetch -Verify {
+                    param($orig, $published)
+                    throw "Mock published content mismatch."
+                }
+            } catch { $mismatchRejected = $true }
+            if (-not $mismatchRejected) { throw "Mismatched published package was accepted." }
+
+            Write-Host "Release regression checks passed: payload integrity; tag creation and retries; stable version progression; expected lookup exits; NuGet publication polling."
         } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
         break
     }
@@ -498,15 +551,25 @@ switch ($Phase) {
         if (-not $env:NUGET_API_KEY) { throw "NuGet Trusted Publishing did not return an API key." }
         $output = & dotnet nuget push $package --api-key $env:NUGET_API_KEY --source "https://api.nuget.org/v3/index.json" 2>&1
         $pushCode = $LASTEXITCODE
+        $pushLog = ($output | Out-String).Trim()
+        Write-Host "NuGet push exit code: $pushCode"
+        if ($pushLog) {
+            # GitHub masks known secrets; explicitly redact the exchanged short-lived key too.
+            Write-Host $pushLog.Replace($env:NUGET_API_KEY, "[REDACTED]")
+        }
         if ($pushCode -ne 0) {
             Write-Warning "NuGet push failed. Checking for a concurrent or partially completed publish."
-            Write-Host ($output | Out-String)
         }
-        if (-not (Confirm-NuGetState -Version $manifest.version -Original $package -Attempts 18)) {
-            throw "NuGet package is not verified after push. Draft release remains staged. Retry safely later."
+        # Successful pushes may take substantially longer than three minutes to
+        # become visible in NuGet's signed flat-container feed. Wait up to ~20 min
+        # without re-pushing; after a failed push, retain the shorter recovery check.
+        $attempts = if ($pushCode -eq 0) { 121 } else { 18 }
+        if (-not (Confirm-NuGetState -Version $manifest.version -Original $package -Attempts $attempts)) {
+            throw "NuGet $($manifest.version) is not verified after push. Draft release remains staged. Review the push response and package validation status; retry recovery later."
         }
         if ($pushCode -ne 0) {
             Write-Host "NuGet push failed but previously published package matches; resuming safely."
+            $global:LASTEXITCODE = 0
         }
         break
     }
