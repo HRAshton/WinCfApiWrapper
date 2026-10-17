@@ -1,7 +1,9 @@
-# GitVersion 6.x: master is the single release branch.
+# GitVersion 6.x: Mainline is a version strategy, not a deployment mode.
 # Release tags (vX.Y.Z) anchor subsequent calculations.
 workflow: GitHubFlow/v1
-mode: Mainline
+strategies:
+  - ConfiguredNextVersion
+  - Mainline
 tag-prefix: '[vV]'
 branches:
   main:
