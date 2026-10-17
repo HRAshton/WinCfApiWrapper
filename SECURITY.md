@@ -22,9 +22,11 @@ Please use GitHub's private vulnerability reporting:
 2. Select **Report a vulnerability** (if available).
 3. Provide the affected version, impact, reproduction steps, and a suggested mitigation, if known.
 
-If private vulnerability reporting is not available, contact the maintainer privately via
-[the maintainer's GitHub profile](https://github.com/HRAshton) to arrange a secure
-reporting channel **before sending sensitive vulnerability details**.
+If private reporting is unavailable, use any private contact method listed on
+[the maintainer's GitHub profile](https://github.com/HRAshton). If none is
+available, open a **public issue requesting a private reporting channel only**,
+without including the vulnerability details, and coordinate a secure channel
+with the maintainer before sending sensitive information.
 
 Repository maintainers: private vulnerability reporting must be enabled in repository
 security settings for the reporting form to be available. A `SECURITY.md` file alone
