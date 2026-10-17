@@ -33,11 +33,15 @@ jobs:
         run: |
           dotnet tool install --global GitVersion.Tool --version 6.8.2
           if ($LASTEXITCODE -ne 0) { throw "GitVersion installation failed" }
-          $semver = (dotnet-gitversion /showvariable SemVer /config GitVersion.yml | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($semver)) {
-            throw "GitVersion failed to calculate a version"
+          $json = (& dotnet-gitversion /config GitVersion.yml /output json /l console 2>&1 | Out-String).Trim()
+          Write-Host "GitVersion diagnostics and output:"
+          Write-Host $json
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitVersion exited with code $LASTEXITCODE"
           }
-          Write-Host "GitVersion SemVer: $semver"
+          if ([string]::IsNullOrWhiteSpace($json)) {
+            throw "GitVersion returned empty output"
+          }
 
       - name: Restore unit tests and library
         run: dotnet restore tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj
