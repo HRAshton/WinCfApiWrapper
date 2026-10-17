@@ -26,11 +26,18 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Restore
-        run: dotnet restore WinCfApiWrapper.slnx
+      # The .slnx format requires a newer SDK than the .NET 8 compiler used here.
+      - name: Restore unit tests and library
+        run: dotnet restore tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj
 
-      - name: Build
-        run: dotnet build WinCfApiWrapper.slnx --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+      - name: Restore native integration test project
+        run: dotnet restore tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+
+      - name: Build unit tests and library
+        run: dotnet build tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Compile native integration tests
+        run: dotnet build tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
 
       - name: Unit tests
         run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-build --no-restore
