@@ -1,6 +1,7 @@
 # WinCfApiWrapper
 
 [![CI](https://github.com/HRAshton/WinCfApiWrapper/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/HRAshton/WinCfApiWrapper/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/HRAshton/WinCfApiWrapper/badge)](https://scorecard.dev/viewer/?uri=github.com/HRAshton/WinCfApiWrapper)
 [![NuGet](https://img.shields.io/nuget/v/WinCfApiWrapper)](https://www.nuget.org/packages/WinCfApiWrapper)
 [![0BSD License](https://img.shields.io/badge/license-0BSD-blue)](LICENSE)
 ![.NET 8+](https://img.shields.io/badge/.NET-8%2B-512BD4)

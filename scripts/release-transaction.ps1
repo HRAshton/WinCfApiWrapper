@@ -12,7 +12,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 $repo = "HRAshton/WinCfApiWrapper"
 $packageId = "WinCfApiWrapper"
-$signer = "$repo/.github/workflows/release.yml"
+$signer = "$repo/.github/workflows/attested-release-build.yml"
 $stageDir = Join-Path (Get-Location) "release-stage"
 $originalDir = Join-Path (Get-Location) "artifacts"
 $manifestName = "release-manifest.json"

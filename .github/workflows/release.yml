@@ -14,17 +14,17 @@ permissions:
   contents: read
 
 jobs:
-  release:
+  resolve:
     if: github.ref == 'refs/heads/master'
-    name: Reconcile, attest and publish
+    name: Resolve release identity
     runs-on: windows-latest
-    environment: nuget
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
-      artifact-metadata: write
-
+      contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+      build: ${{ steps.release.outputs.build }}
     steps:
       - name: Checkout complete Git history and tags
         uses: actions/checkout@v4
@@ -37,8 +37,6 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # Existing tags/draft releases are examined BEFORE calculating a new version.
-      # Never rebuild an already-published package on a retry.
       - name: Resolve release transaction
         id: release
         shell: pwsh
@@ -46,75 +44,70 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/release-transaction.ps1 -Phase Resolve
 
-      - name: Restore unit tests and library
-        if: steps.release.outputs.build == 'true'
-        run: dotnet restore tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj
+  build:
+    name: Isolated SLSA-attested build
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    uses: ./.github/workflows/attested-release-build.yml
+    with:
+      commit: ${{ needs.resolve.outputs.commit }}
+      version: ${{ needs.resolve.outputs.version }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
 
-      - name: Unit tests
-        if: steps.release.outputs.build == 'true'
-        run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
-
-      - name: Restore integration tests
-        if: steps.release.outputs.build == 'true'
-        run: dotnet restore tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
-
-      - name: Offline integration and stress tests
-        if: steps.release.outputs.build == 'true'
-        run: >-
-          dotnet test
-          tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
-          --configuration Release --no-restore
-          --filter "Category=Offline"
-          --blame-hang-timeout 3m
-
-      - name: Live E2E tests (required before initial publication)
-        if: steps.release.outputs.build == 'true'
-        env:
-          RZM_RUN_LIVE_TESTS: '1'
-        run: >-
-          dotnet test
-          tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
-          --configuration Release --no-build --no-restore
-          --filter "Category=Live"
-          --blame-hang-timeout 3m
-
-      - name: Build original release packages
-        if: steps.release.outputs.build == 'true'
-        shell: pwsh
-        env:
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-        run: |
-          dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true "-p:Version=$env:RELEASE_VERSION" --output artifacts
-          if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed" }
-
-      # The attestation is recorded with GitHub independently from the draft release.
-      - name: Attest original package and symbols
-        if: steps.release.outputs.build == 'true'
-        uses: actions/attest@v4
+  publish:
+    name: Reconcile and publish verified artifacts
+    needs: [resolve, build]
+    if: >-
+      always() &&
+      needs.resolve.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: windows-latest
+    environment: nuget
+    permissions:
+      contents: write
+      id-token: write
+      attestations: read
+    steps:
+      - name: Checkout release transaction and Git tags
+        uses: actions/checkout@v4
         with:
-          subject-path: 'artifacts/*'
+          fetch-depth: 0
+          persist-credentials: false
 
-      # The staging script explicitly creates and verifies the v* tag before
-      # creating the draft Release, which persists immutable build inputs.
-      # No NuGet push is allowed until these exact files can be downloaded,
-      # checksum-verified and verified against the Actions attestation.
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download exact attested build output
+        if: needs.resolve.outputs.build == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          merge-multiple: true
+          path: artifacts
+
       - name: Stage draft GitHub Release with manifest
-        if: steps.release.outputs.build == 'true'
+        if: needs.resolve.outputs.build == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
         run: ./scripts/release-transaction.ps1 -Phase Stage
 
-      - name: Verify persisted artifacts and attestation
+      - name: Verify immutable artifacts and SLSA provenance
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
         run: ./scripts/release-transaction.ps1 -Phase VerifyStage
 
       - name: Reconcile existing NuGet publication
@@ -122,9 +115,9 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
         run: ./scripts/release-transaction.ps1 -Phase InspectNuGet
 
       - name: Obtain NuGet Trusted Publishing token
@@ -139,9 +132,9 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
           NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
         run: ./scripts/release-transaction.ps1 -Phase PushNuGet
 
@@ -149,7 +142,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
         run: ./scripts/release-transaction.ps1 -Phase Finalize
