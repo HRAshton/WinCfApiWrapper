@@ -12,6 +12,19 @@ permissions:
   id-token: write
 
 jobs:
+  reuse-lint:
+    name: REUSE compliance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run REUSE lint
+        uses: fsfe/reuse-action@v5
+
   build-and-test:
     name: Build and unit tests (Windows)
     runs-on: windows-latest
