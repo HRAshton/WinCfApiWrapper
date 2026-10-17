@@ -20,6 +20,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -27,6 +28,17 @@ jobs:
           dotnet-version: '8.0.x'
 
       # The .slnx format requires a newer SDK than the .NET 8 compiler used here.
+      - name: Validate GitVersion configuration
+        shell: pwsh
+        run: |
+          dotnet tool install --global GitVersion.Tool --version 6.8.2
+          if ($LASTEXITCODE -ne 0) { throw "GitVersion installation failed" }
+          $semver = (dotnet-gitversion /showvariable SemVer /config GitVersion.yml | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($semver)) {
+            throw "GitVersion failed to calculate a version"
+          }
+          Write-Host "GitVersion SemVer: $semver"
+
       - name: Restore unit tests and library
         run: dotnet restore tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj
 
