@@ -1,0 +1,8 @@
+# Codecov posts or updates a report on every PR with uploaded coverage.
+# Allow an initial PR comment even before a baseline is available on master.
+comment:
+  layout: "header, diff, flags, files, footer"
+  behavior: default
+  require_changes: false
+  require_base: false
+  require_head: true
