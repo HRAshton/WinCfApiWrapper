@@ -95,9 +95,44 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'dotnet pack failed' }
 
       - name: Attest release packages
+        id: attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: 'artifacts/*'
+          subject-path: 'artifacts/*.nupkg,artifacts/*.snupkg'
+
+      # The attestation is created in this isolated build and transferred with
+      # the exact package bytes. Do not re-sign or fabricate it in the publish job.
+      - name: Export signed in-toto provenance bundle
+        shell: pwsh
+        env:
+          SIGNED_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          BUILD_VERSION: ${{ inputs.version }}
+          BUILD_COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if (-not (Test-Path -LiteralPath $env:SIGNED_BUNDLE -PathType Leaf)) {
+            throw 'The signed provenance bundle is missing from the attestation action.'
+          }
+          $bundle = Get-Content -LiteralPath $env:SIGNED_BUNDLE -Raw | ConvertFrom-Json
+          if (-not $bundle.dsseEnvelope -or -not $bundle.verificationMaterial -or
+              -not $bundle.dsseEnvelope.payload -or @($bundle.dsseEnvelope.signatures).Count -lt 1) {
+            throw 'Attestation action returned an invalid Sigstore bundle.'
+          }
+          $provenance = Join-Path (Get-Location) "artifacts/WinCfApiWrapper.$env:BUILD_VERSION.intoto.jsonl"
+          # The Sigstore bundle is a single JSON object; one compact JSON line
+          # is valid JSONL and directly supported by gh attestation verify.
+          $line = $bundle | ConvertTo-Json -Depth 100 -Compress
+          [IO.File]::WriteAllText($provenance, "$line`n", [Text.UTF8Encoding]::new($false))
+          foreach ($extension in @('nupkg', 'snupkg')) {
+            $package = Join-Path (Get-Location) "artifacts/WinCfApiWrapper.$env:BUILD_VERSION.$extension"
+            if (-not (Test-Path -LiteralPath $package -PathType Leaf)) {
+              throw "Missing attested package $package."
+            }
+            gh attestation verify $package --bundle $provenance --repo $env:GITHUB_REPOSITORY `
+              --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/attested-release-build.yml" `
+              --source-ref refs/heads/master --source-digest $env:BUILD_COMMIT
+            if ($LASTEXITCODE -ne 0) { throw "Offline bundle verification failed for $package." }
+          }
 
       - name: Upload immutable attested packages
         id: upload
@@ -107,5 +142,6 @@ jobs:
           path: |
             artifacts/*.nupkg
             artifacts/*.snupkg
+            artifacts/*.intoto.jsonl
           if-no-files-found: error
           retention-days: 90
