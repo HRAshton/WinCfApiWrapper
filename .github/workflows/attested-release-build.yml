@@ -1,0 +1,109 @@
+name: Attested Windows release build
+
+on:
+  workflow_call:
+    inputs:
+      commit:
+        description: Exact source commit to build
+        required: true
+        type: string
+      version:
+        description: Stable NuGet package version
+        required: true
+        type: string
+    outputs:
+      artifact_id:
+        description: Immutable GitHub Actions artifact containing the attested packages
+        value: ${{ jobs.build.outputs.artifact_id }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, test and attest
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Checkout source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check release identity
+        shell: pwsh
+        env:
+          BUILD_COMMIT: ${{ inputs.commit }}
+          BUILD_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:BUILD_COMMIT -cnotmatch '^[0-9a-f]{40}$' -or
+              $env:BUILD_VERSION -cnotmatch '^\d+\.\d+\.\d+$') {
+            throw 'Invalid source commit or release version'
+          }
+          if ((git rev-parse HEAD).Trim() -cne $env:BUILD_COMMIT) {
+            throw 'Checked-out source does not match the resolved release commit'
+          }
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore unit tests and library
+        run: dotnet restore tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj
+
+      - name: Unit tests
+        run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Restore integration tests
+        run: dotnet restore tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+
+      - name: Offline integration and stress tests
+        run: >-
+          dotnet test
+          tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+          --configuration Release --no-restore
+          --filter "Category=Offline"
+          --blame-hang-timeout 3m
+
+      - name: Live E2E tests
+        env:
+          RZM_RUN_LIVE_TESTS: '1'
+        run: >-
+          dotnet test
+          tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+          --configuration Release --no-build --no-restore
+          --filter "Category=Live"
+          --blame-hang-timeout 3m
+
+      - name: Pack release
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true "-p:Version=$env:RELEASE_VERSION" --output artifacts
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet pack failed' }
+
+      - name: Attest release packages
+        uses: actions/attest@v4
+        with:
+          subject-path: 'artifacts/*'
+
+      - name: Upload immutable attested packages
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: slsa-attested-release-packages
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+          retention-days: 90
