@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and unit tests (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # The .slnx format requires a newer SDK than the .NET 8 compiler used here.
+      - name: Validate release recovery script syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path (Get-Location) 'scripts/release-transaction.ps1'),
+            [ref]$tokens, [ref]$errors
+          )
+          if (@($errors).Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.ToString() }
+            throw 'Release transaction script has PowerShell syntax errors'
+          }
+
+      - name: Test release retry package integrity checks
+        shell: pwsh
+        run: ./scripts/release-transaction.ps1 -Phase SelfTest
+
+      - name: Validate GitVersion configuration
+        shell: pwsh
+        run: |
+          dotnet tool install --global GitVersion.Tool --version 6.8.2
+          if ($LASTEXITCODE -ne 0) { throw "GitVersion installation failed" }
+          $semver = (& dotnet-gitversion /showvariable SemVer /config GitVersion.yml 2>&1 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $semver -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            Write-Host $semver
+            throw "GitVersion failed to produce valid SemVer"
+          }
+          Write-Host "GitVersion SemVer: $semver"
+
+      - name: Restore unit tests and library
+        run: dotnet restore tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj
+
+      - name: Restore native integration test project
+        run: dotnet restore tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+
+      - name: Build unit tests and library
+        run: dotnet build tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Compile native integration tests
+        run: dotnet build tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Unit tests and coverage
+        run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-build --no-restore --collect "Code Coverage" --settings tests/coverage.runsettings --results-directory TestResults
+
+      - name: Report line coverage
+        shell: pwsh
+        run: |
+          $report = Get-ChildItem TestResults -Filter '*.cobertura.xml' -Recurse |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $report) { throw "No Cobertura report was generated" }
+          [xml]$coverage = Get-Content $report.FullName -Raw
+          $rate = [double]::Parse($coverage.coverage.'line-rate', [System.Globalization.CultureInfo]::InvariantCulture)
+          $pct = [math]::Round($rate * 100, 2)
+          Write-Host "Unit-test line coverage: $pct%"
+          "### Unit-test line coverage: $pct%" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-coverage
+          path: TestResults/**/*.cobertura.xml
+          if-no-files-found: error
+
+      # Includes offline stress tests. Live-network E2E is gated on release.
+      - name: Offline integration and stress tests
+        run: >-
+          dotnet test
+          tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+          --configuration Release --no-build --no-restore
+          --filter "Category=Offline"
+          --blame-hang-timeout 3m
+
+      - name: Verify NuGet package
+        run: dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true --output artifacts
+
+      - name: Upload package preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-preview
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error

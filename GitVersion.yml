@@ -1,0 +1,15 @@
+# GitVersion 6.x: Mainline is a version strategy, not a deployment mode.
+# Release tags (vX.Y.Z) anchor subsequent calculations.
+workflow: GitHubFlow/v1
+strategies:
+  - ConfiguredNextVersion
+  - Mainline
+tag-prefix: '[vV]?'
+# Bootstrap only; after publishing v0.1.0, remove this line and use tags.
+next-version: 0.1.0
+branches:
+  main:
+    regex: ^master$
+    label: ''
+    increment: Patch
+    is-main-branch: true

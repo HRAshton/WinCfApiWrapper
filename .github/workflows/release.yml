@@ -1,0 +1,155 @@
+name: Publish NuGet
+
+on:
+  schedule:
+    - cron: '17 12 * * 4'
+      timezone: 'Europe/Belgrade'
+  workflow_dispatch:
+
+concurrency:
+  group: nuget-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/master'
+    name: Reconcile, attest and publish
+    runs-on: windows-latest
+    environment: nuget
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - name: Checkout complete Git history and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Existing tags/draft releases are examined BEFORE calculating a new version.
+      # Never rebuild an already-published package on a retry.
+      - name: Resolve release transaction
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/release-transaction.ps1 -Phase Resolve
+
+      - name: Restore unit tests and library
+        if: steps.release.outputs.build == 'true'
+        run: dotnet restore tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj
+
+      - name: Unit tests
+        if: steps.release.outputs.build == 'true'
+        run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Restore integration tests
+        if: steps.release.outputs.build == 'true'
+        run: dotnet restore tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+
+      - name: Offline integration and stress tests
+        if: steps.release.outputs.build == 'true'
+        run: >-
+          dotnet test
+          tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+          --configuration Release --no-restore
+          --filter "Category=Offline"
+          --blame-hang-timeout 3m
+
+      - name: Live E2E tests (required before initial publication)
+        if: steps.release.outputs.build == 'true'
+        env:
+          RZM_RUN_LIVE_TESTS: '1'
+        run: >-
+          dotnet test
+          tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+          --configuration Release --no-build --no-restore
+          --filter "Category=Live"
+          --blame-hang-timeout 3m
+
+      - name: Build original release packages
+        if: steps.release.outputs.build == 'true'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true "-p:Version=$env:RELEASE_VERSION" --output artifacts
+          if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed" }
+
+      # The attestation is recorded with GitHub independently from the draft release.
+      - name: Attest original package and symbols
+        if: steps.release.outputs.build == 'true'
+        uses: actions/attest@v4
+        with:
+          subject-path: 'artifacts/*'
+
+      # The staging script explicitly creates and verifies the v* tag before
+      # creating the draft Release, which persists immutable build inputs.
+      # No NuGet push is allowed until these exact files can be downloaded,
+      # checksum-verified and verified against the Actions attestation.
+      - name: Stage draft GitHub Release with manifest
+        if: steps.release.outputs.build == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+        run: ./scripts/release-transaction.ps1 -Phase Stage
+
+      - name: Verify persisted artifacts and attestation
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+        run: ./scripts/release-transaction.ps1 -Phase VerifyStage
+
+      - name: Reconcile existing NuGet publication
+        id: nuget_status
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+        run: ./scripts/release-transaction.ps1 -Phase InspectNuGet
+
+      - name: Obtain NuGet Trusted Publishing token
+        if: steps.nuget_status.outputs.publish == 'true'
+        uses: NuGet/login@v1
+        id: nuget
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish or recover NuGet package
+        if: steps.nuget_status.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
+        run: ./scripts/release-transaction.ps1 -Phase PushNuGet
+
+      - name: Reconcile and publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+        run: ./scripts/release-transaction.ps1 -Phase Finalize
