@@ -18,12 +18,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
       - name: Run REUSE lint
-        uses: fsfe/reuse-action@v5
+        uses: fsfe/reuse-action@bb774aa972c2a89ff34781233d275075cbddf542 # v5
 
   build-and-test:
     name: Build and unit tests (Windows)
@@ -31,13 +31,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '8.0.x'
 
@@ -109,14 +109,14 @@ jobs:
           "file=$relative" >> $env:GITHUB_OUTPUT
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unit-test-coverage
           path: TestResults/**/*.cobertura.xml
           if-no-files-found: error
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
         with:
           use_oidc: true
           files: ${{ steps.coverage.outputs.file }}
@@ -137,7 +137,7 @@ jobs:
         run: dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true --output artifacts
 
       - name: Upload package preview
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: nuget-preview
           path: |
