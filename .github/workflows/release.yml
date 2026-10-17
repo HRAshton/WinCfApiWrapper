@@ -94,7 +94,7 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         shell: pwsh
         run: |
-          dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true "-p:Version=${{ steps.version.outputs.version }}" --output artifacts
+          dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true "-p:Version=${{ steps.version.outputs.version }}}" --output artifacts
           if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed" }
 
       # Required, not best effort. For private repositories this requires
@@ -110,13 +110,13 @@ jobs:
         id: nuget
         uses: NuGet/login@v1
         with:
-          user: ${{ vars.NUGET_USER }
+          user: ${{ vars.NUGET_USER }}
 
       - name: Push to nuget.org
         if: steps.changes.outputs.changed == 'true'
         shell: pwsh
         env:
-          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }
+          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
         run: |
           if (-not $env:NUGET_API_KEY) { throw "NuGet Trusted Publishing did not return an API key" }
           $package = Get-ChildItem artifacts -Filter '*.nupkg' | Select-Object -First 1
@@ -130,8 +130,8 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }
-          RELEASE_TAG: ${{ steps.version.outputs.tag }
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           $assets = @(Get-ChildItem artifacts -File | ForEach-Object { $_.FullName })
           gh release create $env:RELEASE_TAG @assets --target $env:GITHUB_SHA --generate-notes --title $env:RELEASE_TAG
