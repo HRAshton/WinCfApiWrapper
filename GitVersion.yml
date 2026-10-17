@@ -4,7 +4,7 @@ workflow: GitHubFlow/v1
 strategies:
   - ConfiguredNextVersion
   - Mainline
-tag-prefix: '[vV]'
+tag-prefix: '[vV]?'
 # Bootstrap only; after publishing v0.1.0, remove this line and use tags.
 next-version: 0.1.0
 branches:
