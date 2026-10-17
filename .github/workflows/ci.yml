@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write  # Codecov OIDC upload; no repository write access
 
 jobs:
   build-and-test:
@@ -74,6 +75,7 @@ jobs:
         run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-build --no-restore --collect "Code Coverage" --settings tests/coverage.runsettings --results-directory TestResults
 
       - name: Report line coverage
+        id: coverage
         shell: pwsh
         run: |
           $report = Get-ChildItem TestResults -Filter '*.cobertura.xml' -Recurse |
@@ -84,6 +86,10 @@ jobs:
           $pct = [math]::Round($rate * 100, 2)
           Write-Host "Unit-test line coverage: $pct%"
           "### Unit-test line coverage: $pct%" >> $env:GITHUB_STEP_SUMMARY
+          # Pass the concrete report path, rather than relying on the
+          # uploader to expand a Windows-specific recursive glob.
+          $relative = [IO.Path]::GetRelativePath((Get-Location).Path, $report.FullName).Replace('\', '/')
+          "file=$relative" >> $env:GITHUB_OUTPUT
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -91,6 +97,15 @@ jobs:
           name: unit-test-coverage
           path: TestResults/**/*.cobertura.xml
           if-no-files-found: error
+
+      # PR comments are posted by the Codecov GitHub App after upload.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: ${{ steps.coverage.outputs.file }}
+          flags: unittests
+          fail_ci_if_error: true
 
       # Includes offline stress tests. Live-network E2E is gated on release.
       - name: Offline integration and stress tests
