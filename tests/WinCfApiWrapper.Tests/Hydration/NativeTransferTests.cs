@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using WinCfApiWrapper.Hydration;
+using Windows.Win32.Foundation;
 using Windows.Win32.Storage.CloudFilters;
 using Xunit;
 
@@ -7,6 +8,43 @@ namespace WinCfApiWrapper.Tests.Hydration;
 
 public sealed class NativeTransferTests
 {
+    [Fact]
+    public unsafe void NativeTransferInterop_BuildsTransferDataOperation()
+    {
+        var callbackInfo = new CF_CALLBACK_INFO
+        {
+            ConnectionKey = (CF_CONNECTION_KEY)11,
+            TransferKey = 22,
+            RequestKey = 33,
+        };
+        CF_OPERATION_INFO observedOperation = default;
+        CF_OPERATION_PARAMETERS observedParameters = default;
+
+        NativeTransferInterop.Execute(
+            callbackInfo,
+            new TransferCall((nint)0x1234, 4096, 8192, NativeTransfer.StatusCloudFileUnsuccessful),
+            (in CF_OPERATION_INFO operation, ref CF_OPERATION_PARAMETERS parameters) =>
+            {
+                observedOperation = operation;
+                observedParameters = parameters;
+            }
+        );
+
+        Assert.Equal((uint)Marshal.SizeOf<CF_OPERATION_INFO>(), observedOperation.StructSize);
+        Assert.Equal(CF_OPERATION_TYPE.CF_OPERATION_TYPE_TRANSFER_DATA, observedOperation.Type);
+        Assert.Equal(callbackInfo.ConnectionKey, observedOperation.ConnectionKey);
+        Assert.Equal(callbackInfo.TransferKey, observedOperation.TransferKey);
+        Assert.Equal(callbackInfo.RequestKey, observedOperation.RequestKey);
+        Assert.Equal(40u, observedParameters.ParamSize);
+        Assert.Equal(
+            new NTSTATUS(NativeTransfer.StatusCloudFileUnsuccessful),
+            observedParameters.TransferData.CompletionStatus
+        );
+        Assert.Equal((nint)0x1234, (nint)observedParameters.TransferData.Buffer);
+        Assert.Equal(4096, observedParameters.TransferData.Offset);
+        Assert.Equal(8192, observedParameters.TransferData.Length);
+    }
+
     [Fact]
     public void TransferData_GeneratedLayout_HasCfApiParameterSize()
     {
@@ -117,6 +155,57 @@ public sealed class NativeTransferTests
         Assert.Throws<InvalidDataException>(() =>
             transfer.Complete(request, new byte[4095], 4096, 0)
         );
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public void TransferComplete_SuccessfulRangeTransfersPinnedBytesOnce()
+    {
+        var calls = new List<TransferCall>();
+        var transfer = new NativeTransfer(
+            (_, parameters) =>
+            {
+                byte[] transferred = new byte[4];
+                Marshal.Copy(parameters.Buffer, transferred, 0, transferred.Length);
+                Assert.Equal(new byte[] { 1, 2, 3, 4 }, transferred);
+                calls.Add(parameters);
+            }
+        );
+        using FetchRequest request = Request(0, 4, 4);
+        byte[] buffer = [1, 2, 3, 4];
+
+        Assert.True(transfer.Complete(request, buffer, buffer.Length, 0));
+        Assert.False(transfer.Complete(request, buffer, buffer.Length, 0));
+
+        TransferCall call = Assert.Single(calls);
+        Assert.NotEqual(nint.Zero, call.Buffer);
+        Assert.Equal(0, call.Offset);
+        Assert.Equal(4, call.Length);
+        Assert.Equal(0, call.CompletionStatus);
+        Assert.Empty(request.Pending());
+    }
+
+    [Fact]
+    public void TransferComplete_NativeFailureLeavesRangePendingAndMarksCompletionUnknown()
+    {
+        var transfer = new NativeTransfer((_, _) => throw new IOException("native failure"));
+        using FetchRequest request = Request(0, 4, 4);
+
+        Assert.Throws<IOException>(() => transfer.Complete(request, [1, 2, 3, 4], 4, 0));
+
+        Assert.True(request.NativeCompletionFailed);
+        Assert.Equal(new TransferRange(0, 4), Assert.Single(request.Pending()));
+    }
+
+    [Fact]
+    public void TransferFailure_WhenRequestWasCanceledAndHasNoPendingRanges_DoesNotSubmitAgain()
+    {
+        int calls = 0;
+        var transfer = new NativeTransfer((_, _) => calls++);
+        using FetchRequest request = Request(0, 4096, 4096);
+        request.Cancel(0, 4096);
+
+        Assert.False(transfer.Fail(request));
         Assert.Equal(0, calls);
     }
 

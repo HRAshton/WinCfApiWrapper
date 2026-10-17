@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="Code Coverage">
+        <Configuration>
+          <CodeCoverage>
+            <ModulePaths>
+              <Include>
+                <ModulePath>.*\\WinCfApiWrapper\.dll$</ModulePath>
+              </Include>
+            </ModulePaths>
+            <Functions>
+              <Exclude>
+                <Function>^Windows\.Win32\..*</Function>
+              </Exclude>
+            </Functions>
+            <Sources>
+              <Exclude>
+                <!-- These files are Windows API adapters exercised by native integration tests. -->
+                <Source>.*\\Interop\\CloudApi\.cs$</Source>
+                <Source>.*\\Mounting\\NativeMountOperations\.cs$</Source>
+                <Source>.*\\Mounting\\PlaceholderValidator\.cs$</Source>
+                <Source>.*\\Hydration\\NativeTransferInterop\.cs$</Source>
+              </Exclude>
+            </Sources>
+          </CodeCoverage>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

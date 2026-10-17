@@ -147,6 +147,48 @@ public sealed class CancelFetchTests : IDisposable
     }
 
     [Fact]
+    public async Task CancelFetch_RepeatedKey_CancelsAllRunningRequests()
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        GatedReadStream[] streams = [new(new byte[8192]), new(new byte[8192])];
+        int opened = 0;
+        var calls = new List<TransferCall>();
+        var errors = new List<Exception>();
+        var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            2,
+            2,
+            (_, error) => errors.Add(error),
+            new NativeTransfer((_, call) => calls.Add(call)),
+            _ =>
+            {
+                return streams[Interlocked.Increment(ref opened) - 1];
+            }
+        );
+        try
+        {
+            Invoke(coordinator, 1, false);
+            Invoke(coordinator, 1, false);
+            await Task.WhenAll(streams.Select(stream => stream.Started.Task))
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(2, coordinator.PendingRequestCount);
+            Invoke(coordinator, 1, true);
+        }
+        finally
+        {
+            await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        Assert.Equal(2, opened);
+        Assert.All(streams, stream => Assert.True(stream.Canceled));
+        Assert.Empty(calls);
+        Assert.Empty(errors);
+        Assert.Equal(0, coordinator.PendingRequestCount);
+        Assert.Equal(0, coordinator.Statistics.FailedFetches);
+    }
+
+    [Fact]
     public async Task CancelFetch_QueuedRequest_SkipsTransportAndReleasesState()
     {
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);

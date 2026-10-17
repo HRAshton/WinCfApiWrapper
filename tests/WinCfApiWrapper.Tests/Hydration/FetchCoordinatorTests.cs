@@ -32,6 +32,52 @@ public sealed class FetchCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task OnFetch_RepeatedKeyDuringCompletion_TransfersBothRanges()
+    {
+        WriteArchive(8192);
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        var calls = new List<TransferCall>();
+        var errors = new List<Exception>();
+        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        FetchCoordinator? coordinator = null;
+        var transfer = new NativeTransfer(
+            (_, call) =>
+            {
+                calls.Add(call);
+                if (calls.Count == 1)
+                {
+                    // Windows may request more data before the first CfExecute returns.
+                    Invoke(coordinator!, Encoding.UTF8.GetBytes("file.txt"), 8192, 4096, 4096);
+                }
+
+                if (calls.Count == 2)
+                    completed.TrySetResult();
+            }
+        );
+        coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            1,
+            2,
+            (_, error) => errors.Add(error),
+            transfer
+        );
+        await using (coordinator)
+        {
+            Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), 8192, 0, 4096);
+            await completed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        Assert.Empty(errors);
+        Assert.Equal(2, calls.Count);
+        Assert.All(calls, call => Assert.Equal(0, call.CompletionStatus));
+        Assert.Equal(new long[] { 0, 4096 }, calls.Select(call => call.Offset));
+        Assert.All(calls, call => Assert.Equal(4096, call.Length));
+        Assert.Equal(0, coordinator.Statistics.FailedFetches);
+        Assert.Equal(0, coordinator.PendingRequestCount);
+    }
+
+    [Fact]
     public async Task OnFetch_QueueFull_CompletesFailureOnce()
     {
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);

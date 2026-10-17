@@ -17,7 +17,10 @@ internal sealed class FetchCoordinator : IAsyncDisposable
     private readonly IContentContainer _container;
     private readonly Action<string?, Exception> _onError;
     private readonly Func<ContainerEntry, Stream>? _openEntry;
-    private readonly ConcurrentDictionary<FetchKey, FetchRequest> _requests = new();
+
+    // CFAPI can reuse a key while an earlier callback is still completing.
+    // Track each callback independently; cancellation applies to every matching key.
+    private readonly ConcurrentDictionary<FetchRequest, byte> _requests = new();
     private readonly NativeTransfer _transfer;
     private readonly Task[] _workers;
     private int _active;
@@ -67,7 +70,7 @@ internal sealed class FetchCoordinator : IAsyncDisposable
         if (Interlocked.Exchange(ref _stopping, 1) == 0)
         {
             _channel.Writer.TryComplete();
-            foreach (FetchRequest request in _requests.Values)
+            foreach (FetchRequest request in _requests.Keys)
                 request.StopTransport();
         }
 
@@ -113,13 +116,13 @@ internal sealed class FetchCoordinator : IAsyncDisposable
                 name
             );
             bool added =
-                Volatile.Read(ref _stopping) == 0 && _requests.TryAdd(request.Key, request);
+                Volatile.Read(ref _stopping) == 0 && _requests.TryAdd(request, 0);
             switch (added)
             {
                 case true when _channel.Writer.TryWrite(request):
                     return;
                 case true:
-                    _requests.TryRemove(request.Key, out _);
+                    _requests.TryRemove(request, out _);
                     break;
             }
 
@@ -157,8 +160,11 @@ internal sealed class FetchCoordinator : IAsyncDisposable
                 throw new InvalidDataException("Malformed CANCEL_FETCH_DATA parameters.");
 
             var key = new FetchKey(info.ConnectionKey, info.TransferKey, info.RequestKey);
-            if (_requests.TryGetValue(key, out FetchRequest? request))
-                request.Cancel(offset, length);
+            foreach (FetchRequest request in _requests.Keys)
+            {
+                if (request.Key == key)
+                    request.Cancel(offset, length);
+            }
         }
         catch (Exception ex)
         {
@@ -248,7 +254,7 @@ internal sealed class FetchCoordinator : IAsyncDisposable
             }
             finally
             {
-                _requests.TryRemove(request.Key, out _);
+                _requests.TryRemove(request, out _);
                 request.Dispose();
                 Interlocked.Decrement(ref _active);
             }

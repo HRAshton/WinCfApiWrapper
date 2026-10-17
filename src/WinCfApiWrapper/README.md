@@ -90,6 +90,8 @@ root or a folder containing user data; partial cleanup failures are reported as 
 ```powershell
 dotnet build src/WinCfApiWrapper/WinCfApiWrapper.csproj -c Release
 dotnet test tests/WinCfApiWrapper.Tests -c Release
+dotnet test tests/WinCfApiWrapper.Tests -c Release --settings tests/WinCfApiWrapper.Tests/coverage.runsettings '--collect:Code Coverage;Format=Cobertura'
 ```
 
-Native integration tests require Windows Cloud Files support and permission to register sync roots.
+The coverage run excludes generated Windows bindings and native Cloud Files adapters. Native integration tests require
+Windows Cloud Files support and permission to register sync roots.
