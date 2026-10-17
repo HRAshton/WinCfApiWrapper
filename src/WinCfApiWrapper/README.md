@@ -95,7 +95,7 @@ and produces one package preview. Release validation tests both runtimes before 
 ```powershell
 dotnet build src/WinCfApiWrapper/WinCfApiWrapper.csproj -c Release
 dotnet test tests/WinCfApiWrapper.Tests -c Release
-dotnet test tests/WinCfApiWrapper.Tests -c Release -f net8.0-windows --settings tests/WinCfApiWrapper.Tests/coverage.runsettings '--collect:Code Coverage;Format=Cobertura'
+dotnet test tests/WinCfApiWrapper.Tests -c Release -f net8.0-windows --settings tests/coverage.runsettings --collect "Code Coverage"
 ```
 
 The coverage run excludes generated Windows bindings and native Cloud Files adapters. Native integration tests require
