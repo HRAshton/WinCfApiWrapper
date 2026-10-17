@@ -26,8 +26,12 @@ jobs:
         uses: fsfe/reuse-action@676e2d560c9a403aa252096d99fcab3e1132b0f5 # v6.0.0
 
   build-and-test:
-    name: Build and unit tests (Windows)
+    name: Build and tests (Windows, ${{ matrix.framework }})
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [net8.0-windows, net10.0-windows]
 
     steps:
       - name: Checkout
@@ -36,12 +40,13 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Set up .NET
+      - name: Set up .NET 10 SDK and test runtimes
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: |
+            8.0.x
+            10.0.x
 
-      # The .slnx format requires a newer SDK than the .NET 8 compiler used here.
       - name: Validate release recovery script syntax
         shell: pwsh
         run: |
@@ -85,15 +90,21 @@ jobs:
         run: dotnet restore tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
 
       - name: Build unit tests and library
-        run: dotnet build tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+        run: dotnet build tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --framework ${{ matrix.framework }} --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
 
       - name: Compile native integration tests
-        run: dotnet build tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+        run: dotnet build tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj --framework ${{ matrix.framework }} --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
 
       - name: Unit tests and coverage
-        run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-build --no-restore --collect "Code Coverage" --settings tests/coverage.runsettings --results-directory TestResults
+        if: matrix.framework == 'net8.0-windows'
+        run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --framework ${{ matrix.framework }} --configuration Release --no-build --no-restore --collect "Code Coverage" --settings tests/coverage.runsettings --results-directory TestResults
+
+      - name: Unit tests
+        if: matrix.framework != 'net8.0-windows'
+        run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --framework ${{ matrix.framework }} --configuration Release --no-build --no-restore
 
       - name: Report line coverage
+        if: matrix.framework == 'net8.0-windows'
         id: coverage
         shell: pwsh
         run: |
@@ -109,6 +120,7 @@ jobs:
           "file=$relative" >> $env:GITHUB_OUTPUT
 
       - name: Upload coverage report
+        if: matrix.framework == 'net8.0-windows'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unit-test-coverage
@@ -116,6 +128,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload coverage to Codecov
+        if: matrix.framework == 'net8.0-windows'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           use_oidc: true
@@ -129,14 +142,17 @@ jobs:
         run: >-
           dotnet test
           tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+          --framework ${{ matrix.framework }}
           --configuration Release --no-build --no-restore
           --filter "Category=Offline"
           --blame-hang-timeout 3m
 
       - name: Verify NuGet package
+        if: matrix.framework == 'net8.0-windows'
         run: dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true --output artifacts
 
       - name: Upload package preview
+        if: matrix.framework == 'net8.0-windows'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nuget-preview
