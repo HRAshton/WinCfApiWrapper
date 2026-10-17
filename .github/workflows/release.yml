@@ -18,8 +18,10 @@ jobs:
     if: github.ref == 'refs/heads/master'
     name: Resolve release identity
     runs-on: windows-latest
+    # Draft releases are hidden from read-only Actions tokens. Recovery must
+    # inspect their staged assets to avoid rebuilding a published version.
     permissions:
-      contents: read
+      contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
