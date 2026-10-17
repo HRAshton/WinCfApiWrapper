@@ -33,12 +33,18 @@ function Write-OutputVariable {
     Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "$Name=$Value"
 }
 
+function Confirm-ExpectedNotFound {
+    param([string]$Output, [string]$Pattern, [string]$Operation)
+    if ($Output -notmatch $Pattern) { throw "$Operation : $Output" }
+    $global:LASTEXITCODE = 0
+}
+
 function Read-Release {
     param([string]$Tag)
     $output = & gh release view $Tag --repo $repo --json tagName,isDraft,assets 2>&1
     if ($LASTEXITCODE -ne 0) {
-        if (($output | Out-String) -match '(?i)(release not found|http 404)') { return $null }
-        throw "Cannot query GitHub Release $Tag : $($output | Out-String)"
+        Confirm-ExpectedNotFound -Output ($output | Out-String) -Pattern '(?i)(release not found|http 404)' -Operation "Cannot query GitHub Release $Tag"
+        return $null
     }
     return ($output | Out-String | ConvertFrom-Json)
 }
@@ -132,8 +138,8 @@ function Test-RemoteTag {
     param([string]$Tag)
     $response = & gh api "repos/$repo/git/ref/tags/$Tag" 2>&1
     if ($LASTEXITCODE -ne 0) {
-        if (($response | Out-String) -match '(?i)(HTTP 404|Not Found)') { return $false }
-        throw "Cannot inspect remote release tag $Tag : $($response | Out-String)"
+        Confirm-ExpectedNotFound -Output ($response | Out-String) -Pattern '(?i)(HTTP 404|Not Found)' -Operation "Cannot inspect remote release tag $Tag"
+        return $false
     }
     $ref = ($response | Out-String | ConvertFrom-Json)
     if ($ref.ref -cne "refs/tags/$Tag") {
@@ -347,7 +353,23 @@ switch ($Phase) {
                 throw "Release retry or no-change-week selection failed."
             }
 
-            Write-Host "Release regression checks passed: payload integrity; tag creation and retries; stable version progression."
+            $global:LASTEXITCODE = 1
+            Confirm-ExpectedNotFound -Output 'release not found' -Pattern '(?i)(release not found|http 404)' -Operation 'Test release lookup'
+            if ($LASTEXITCODE -ne 0) { throw 'Expected 404 left a failed native exit code.' }
+
+            $global:LASTEXITCODE = 1
+            Confirm-ExpectedNotFound -Output 'HTTP 404 Not Found' -Pattern '(?i)(HTTP 404|Not Found)' -Operation 'Test tag lookup'
+            if ($LASTEXITCODE -ne 0) { throw 'Expected tag 404 left a failed native exit code.' }
+
+            $global:LASTEXITCODE = 1
+            $unexpectedRejected = $false
+            try {
+                Confirm-ExpectedNotFound -Output 'HTTP 403 Forbidden' -Pattern '(?i)(release not found|http 404)' -Operation 'Test denied lookup'
+            } catch { $unexpectedRejected = $true }
+            if (-not $unexpectedRejected) { throw 'Unexpected API failure was ignored.' }
+            $global:LASTEXITCODE = 0
+
+            Write-Host "Release regression checks passed: payload integrity; tag creation and retries; stable version progression; expected lookup exits."
         } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
         break
     }
