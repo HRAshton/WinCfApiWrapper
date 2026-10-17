@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using WinCfApiWrapper.Hydration;
+using Windows.Win32.Foundation;
 using Windows.Win32.Storage.CloudFilters;
 using Xunit;
 
@@ -7,6 +8,43 @@ namespace WinCfApiWrapper.Tests.Hydration;
 
 public sealed class NativeTransferTests
 {
+    [Fact]
+    public unsafe void NativeTransferInterop_BuildsTransferDataOperation()
+    {
+        var callbackInfo = new CF_CALLBACK_INFO
+        {
+            ConnectionKey = (CF_CONNECTION_KEY)11,
+            TransferKey = 22,
+            RequestKey = 33,
+        };
+        CF_OPERATION_INFO observedOperation = default;
+        CF_OPERATION_PARAMETERS observedParameters = default;
+
+        NativeTransferInterop.Execute(
+            callbackInfo,
+            new TransferCall((nint)0x1234, 4096, 8192, NativeTransfer.StatusCloudFileUnsuccessful),
+            (in CF_OPERATION_INFO operation, ref CF_OPERATION_PARAMETERS parameters) =>
+            {
+                observedOperation = operation;
+                observedParameters = parameters;
+            }
+        );
+
+        Assert.Equal((uint)Marshal.SizeOf<CF_OPERATION_INFO>(), observedOperation.StructSize);
+        Assert.Equal(CF_OPERATION_TYPE.CF_OPERATION_TYPE_TRANSFER_DATA, observedOperation.Type);
+        Assert.Equal(callbackInfo.ConnectionKey, observedOperation.ConnectionKey);
+        Assert.Equal(callbackInfo.TransferKey, observedOperation.TransferKey);
+        Assert.Equal(callbackInfo.RequestKey, observedOperation.RequestKey);
+        Assert.Equal(40u, observedParameters.ParamSize);
+        Assert.Equal(
+            new NTSTATUS(NativeTransfer.StatusCloudFileUnsuccessful),
+            observedParameters.TransferData.CompletionStatus
+        );
+        Assert.Equal((nint)0x1234, (nint)observedParameters.TransferData.Buffer);
+        Assert.Equal(4096, observedParameters.TransferData.Offset);
+        Assert.Equal(8192, observedParameters.TransferData.Length);
+    }
+
     [Fact]
     public void TransferData_GeneratedLayout_HasCfApiParameterSize()
     {

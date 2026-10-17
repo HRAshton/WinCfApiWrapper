@@ -7,7 +7,19 @@ namespace WinCfApiWrapper.Hydration;
 
 internal static class NativeTransferInterop
 {
-    internal static unsafe void Execute(CF_CALLBACK_INFO info, TransferCall transfer)
+    internal delegate void ExecuteOperation(
+        in CF_OPERATION_INFO info,
+        ref CF_OPERATION_PARAMETERS parameters
+    );
+
+    internal static void Execute(CF_CALLBACK_INFO info, TransferCall transfer) =>
+        Execute(info, transfer, CloudApi.Execute);
+
+    internal static unsafe void Execute(
+        CF_CALLBACK_INFO info,
+        TransferCall transfer,
+        ExecuteOperation execute
+    )
     {
         var operation = new CF_OPERATION_INFO
         {
@@ -32,6 +44,6 @@ internal static class NativeTransferInterop
         parameters.TransferData.Offset = transfer.Offset;
         parameters.TransferData.Length = transfer.Length;
 
-        CloudApi.Execute(in operation, ref parameters);
+        execute(in operation, ref parameters);
     }
 }
