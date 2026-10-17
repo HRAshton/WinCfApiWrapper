@@ -8,6 +8,8 @@
   "timezone": "Europe/Belgrade",
   "schedule": ["* * * * 1"],
   "updateNotScheduled": false,
+  "semanticCommits": "enabled",
+  "commitMessageLowerCase": "never",
   "automergeType": "pr",
   "platformAutomerge": true,
   "packageRules": [
@@ -21,6 +23,11 @@
     {
       "description": "Each major update gets its own PR and can automerge after CI",
       "matchUpdateTypes": ["major"],
+      "automerge": true
+    },
+    {
+      "description": "Automerge pinned and updated dependency digests after CI",
+      "matchUpdateTypes": ["pinDigest", "digest"],
       "automerge": true
     }
   ]
