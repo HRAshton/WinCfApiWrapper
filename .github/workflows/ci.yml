@@ -74,6 +74,15 @@ jobs:
           path: TestResults/**/*.cobertura.xml
           if-no-files-found: error
 
+      # Includes offline stress tests. Live-network E2E is gated on release.
+      - name: Offline integration and stress tests
+        run: >-
+          dotnet test
+          tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+          --configuration Release --no-build --no-restore
+          --filter "Category=Offline"
+          --blame-hang-timeout 3m
+
       - name: Verify NuGet package
         run: dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true --output artifacts
 

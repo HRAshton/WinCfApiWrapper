@@ -1,4 +1,4 @@
-name: Native integration tests
+name: Live E2E (manual)
 
 on:
   workflow_dispatch:
@@ -7,10 +7,9 @@ permissions:
   contents: read
 
 jobs:
-  integration:
-    name: Cloud Files integration (Windows)
+  live-e2e:
+    name: Live GitHub ZIP E2E (Windows)
     runs-on: windows-latest
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,7 +19,13 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # These tests use the native Windows Cloud Files subsystem.
-      # Run manually first; hosted runners may lack the required privileges.
-      - name: Native integration tests
-        run: dotnet test tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj --configuration Release
+      # External download test is deliberately opt-in outside release.
+      - name: Run live E2E tests
+        env:
+          RZM_RUN_LIVE_TESTS: '1'
+        run: >-
+          dotnet test
+          tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
+          --configuration Release
+          --filter "Category=Live"
+          --blame-hang-timeout 3m
