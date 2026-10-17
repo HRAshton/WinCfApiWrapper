@@ -9,7 +9,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write  # Codecov OIDC upload; no repository write access
+  id-token: write
 
 jobs:
   build-and-test:
@@ -86,8 +86,6 @@ jobs:
           $pct = [math]::Round($rate * 100, 2)
           Write-Host "Unit-test line coverage: $pct%"
           "### Unit-test line coverage: $pct%" >> $env:GITHUB_STEP_SUMMARY
-          # Pass the concrete report path, rather than relying on the
-          # uploader to expand a Windows-specific recursive glob.
           $relative = [IO.Path]::GetRelativePath((Get-Location).Path, $report.FullName).Replace('\', '/')
           "file=$relative" >> $env:GITHUB_OUTPUT
 
@@ -98,7 +96,6 @@ jobs:
           path: TestResults/**/*.cobertura.xml
           if-no-files-found: error
 
-      # PR comments are posted by the Codecov GitHub App after upload.
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
