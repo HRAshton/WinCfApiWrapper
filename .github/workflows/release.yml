@@ -97,8 +97,7 @@ jobs:
           dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true "-p:Version=${{ steps.version.outputs.version }}}" --output artifacts
           if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed" }
 
-      # Required, not best effort. For private repositories this requires
-      # GitHub Enterprise Cloud; otherwise publish after making the repo public.
+      # Required, not best effort; the public repo supports build attestations.
       - name: Attest exact build artifacts
         if: steps.changes.outputs.changed == 'true'
         uses: actions/attest@v4

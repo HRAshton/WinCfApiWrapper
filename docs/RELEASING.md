@@ -10,12 +10,12 @@
 
 ## One-time owner setup (required before first release)
 
-1. Install/authorize the [Mend Renovate GitHub App](https://github.com/apps/renovate) for this repository.
+1. Follow [the pre-merge setup checklist](SETUP-RELEASE.md), including the administrator-applied ruleset and GitHub environment configuration. Install/authorize the [Mend Renovate GitHub App](https://github.com/apps/renovate) for this repository.
 2. In GitHub Settings -> Actions, enable actions. Enable auto-merge and protect `master` with a ruleset requiring the CI `Build and unit tests (Windows)` check. Do not require human review for Renovate PRs if fully unattended updates are desired. Configure branch/ruleset protections as needed; the config file alone does not turn these on.
 3. Create a GitHub environment named `nuget`. You may require human approval for deployment if desired, but doing so will make Thursday releases non-automatic.
 4. Set the repository (or `nuget` environment) variable `NUGET_USER` to your nuget.org **username**, not email.
 5. On [nuget.org Trusted Publishing](https://www.nuget.org/account/TrustedPublishing), create a GitHub Actions policy for owner `HRAshton`, repository `WinCfApiWrapper`, workflow `release.yml`, and environment `nuget`. Permit first-package creation as well as future versions. New policies may need an activation period.
-6. Make the repository **public**, or use **GitHub Enterprise Cloud** for private-repo artifact attestations. The workflow deliberately fails closed at the attestation step, before NuGet publishing, if GitHub does not support it for the repository.
+6. The repository is **public** (verified 2026-10-17), so public artifact attestations can be used. The workflow deliberately fails closed at the attestation step, before NuGet publishing, if attestation cannot be generated.
 7. Verify that `WinCfApiWrapper` is available to claim as a package ID, or update the ID and matching README badge before publishing.
 
 ## Versioning
