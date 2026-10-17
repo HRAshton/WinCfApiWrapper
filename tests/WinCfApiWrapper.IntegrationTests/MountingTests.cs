@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Win32.SafeHandles;
 using WinCfApiWrapper.IntegrationTests.Fixtures;
 using WinCfApiWrapper.Mounting;
 using WinCfApiWrapper.Public;
@@ -21,7 +23,14 @@ public sealed class MountingTests
         ICloudMount mount = new CloudMountFactory(NullLogger<CloudMount>.Instance).Open(
             new CloudMountOptions
             {
-                Container = new ZipContainer(_ => File.OpenRead(source)),
+                Container = new ZipContainer(_ =>
+                    File.Open(
+                        source,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.Read | FileShare.Delete
+                    )
+                ),
                 Root = root,
             }
         );
@@ -47,6 +56,59 @@ public sealed class MountingTests
             {
                 if (File.Exists(source))
                     File.Delete(source);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Dispose_AfterHydration_ReleasesSourceArchiveHandles()
+    {
+        string root = FixtureArchive.Root();
+        string source = Path.Combine(Path.GetDirectoryName(root)!, Path.GetFileName(root) + ".zip");
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        File.Copy(FixtureArchive.LocalPath, source);
+        var handles = new ConcurrentBag<SafeFileHandle>();
+        ICloudMount mount = new CloudMountFactory(NullLogger<CloudMount>.Instance).Open(
+            new CloudMountOptions
+            {
+                Container = new ZipContainer(_ =>
+                {
+                    FileStream stream = File.OpenRead(source);
+                    handles.Add(stream.SafeFileHandle);
+                    return stream;
+                }),
+                Root = root,
+            }
+        );
+        bool registered = false;
+        try
+        {
+            await mount.MountAsync();
+            registered = true;
+            await mount.HydrateAsync("docs/hello.txt");
+
+            await mount.DisposeAsync();
+
+            Assert.True(handles.Count >= 2, "Expected indexing and hydration to open the archive.");
+            Assert.All(handles, handle => Assert.True(handle.IsClosed));
+            using FileStream exclusive = File.Open(
+                source,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.None
+            );
+        }
+        finally
+        {
+            await mount.DisposeAsync();
+            try
+            {
+                if (registered)
+                    FixtureArchive.CleanupRoot(root);
+            }
+            finally
+            {
+                File.Delete(source);
             }
         }
     }

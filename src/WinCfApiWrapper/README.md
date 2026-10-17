@@ -87,10 +87,15 @@ root or a folder containing user data; partial cleanup failures are reported as 
 
 ## Build
 
+Build with the .NET 10 SDK. The library targets `net8.0-windows`; tests target both
+`net8.0-windows` and `net10.0-windows` and require both runtimes to be installed.
+CI runs unit and offline integration tests on each runtime, collects coverage on .NET 8,
+and produces one package preview. Release validation tests both runtimes before packing once.
+
 ```powershell
 dotnet build src/WinCfApiWrapper/WinCfApiWrapper.csproj -c Release
 dotnet test tests/WinCfApiWrapper.Tests -c Release
-dotnet test tests/WinCfApiWrapper.Tests -c Release --settings tests/WinCfApiWrapper.Tests/coverage.runsettings '--collect:Code Coverage;Format=Cobertura'
+dotnet test tests/WinCfApiWrapper.Tests -c Release -f net8.0-windows --settings tests/WinCfApiWrapper.Tests/coverage.runsettings '--collect:Code Coverage;Format=Cobertura'
 ```
 
 The coverage run excludes generated Windows bindings and native Cloud Files adapters. Native integration tests require

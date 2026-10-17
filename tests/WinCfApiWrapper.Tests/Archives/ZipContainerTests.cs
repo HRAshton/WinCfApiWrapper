@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using Microsoft.Win32.SafeHandles;
 using WinCfApiWrapper.Public;
 using WinCfApiWrapper.Public.Containers;
 using Xunit;
@@ -187,6 +188,76 @@ public sealed class ZipContainerTests
         byte[] remaining = new byte[2];
         Assert.Equal(2, await opened.ReadAsync(remaining, 0, remaining.Length));
         Assert.Equal("ad", Encoding.UTF8.GetString(remaining));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenRead_Dispose_ReleasesSharedArchiveHandle(bool disposeAsync)
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"WinCfApiWrapper.{Guid.NewGuid():N}.zip");
+        var handles = new List<SafeFileHandle>();
+        try
+        {
+            await File.WriteAllBytesAsync(
+                path,
+                BuildArchive(("file.txt", "payload")),
+                TestContext.Current.CancellationToken
+            );
+            var container = new ZipContainer(_ =>
+            {
+                FileStream stream = File.Open(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read | FileShare.Delete
+                );
+                handles.Add(stream.SafeFileHandle);
+                return stream;
+            });
+            ContainerEntry entry = Assert.Single(
+                await container.GetEntriesAsync(TestContext.Current.CancellationToken)
+            );
+            Assert.True(Assert.Single(handles).IsClosed);
+
+            await using (
+                Stream opened = await container.OpenReadAsync(
+                    entry,
+                    TestContext.Current.CancellationToken
+                )
+            )
+            {
+                Assert.Equal(2, handles.Count);
+                Assert.False(handles[1].IsClosed);
+                Assert.Equal((int)'p', opened.ReadByte());
+                Assert.Throws<IOException>(() =>
+                {
+                    using FileStream exclusive = File.Open(
+                        path,
+                        FileMode.Open,
+                        FileAccess.ReadWrite,
+                        FileShare.None
+                    );
+                });
+
+                if (disposeAsync)
+                    await opened.DisposeAsync();
+                else
+                    opened.Dispose();
+
+                Assert.All(handles, handle => Assert.True(handle.IsClosed));
+                using FileStream exclusive = File.Open(
+                    path,
+                    FileMode.Open,
+                    FileAccess.ReadWrite,
+                    FileShare.None
+                );
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     private static string ReadTwoBytes(Stream stream)
