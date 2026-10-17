@@ -94,7 +94,8 @@ jobs:
         with:
           subject-path: 'artifacts/*'
 
-      # The draft Release acts as durable staging storage. It creates the v* tag.
+      # The staging script explicitly creates and verifies the v* tag before
+      # creating the draft Release, which persists immutable build inputs.
       # No NuGet push is allowed until these exact files can be downloaded,
       # checksum-verified and verified against the Actions attestation.
       - name: Stage draft GitHub Release with manifest
