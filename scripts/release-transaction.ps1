@@ -231,8 +231,13 @@ function Confirm-SignedProvenanceBundle {
     try { $bundle = ConvertFrom-Json -InputObject $raw -ErrorAction Stop }
     catch { throw "Malformed signed provenance JSON bundle: $_" }
     if (-not $bundle.dsseEnvelope -or -not $bundle.verificationMaterial -or
-        -not $bundle.dsseEnvelope.payload -or @($bundle.dsseEnvelope.signatures).Count -lt 1) {
-        throw "Signed provenance is not a Sigstore DSSE bundle."
+        -not $bundle.dsseEnvelope.payload -or
+        -not ($bundle.dsseEnvelope.signatures -is [array]) -or
+        $bundle.dsseEnvelope.signatures.Count -lt 1 -or
+        @($bundle.dsseEnvelope.signatures | Where-Object {
+            $null -eq $_ -or -not ($_.sig -is [string]) -or [string]::IsNullOrWhiteSpace($_.sig)
+        }).Count -gt 0) {
+        throw "Signed provenance is not a Sigstore DSSE bundle with signatures."
     }
     foreach ($file in $Packages) {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Provenance subject is missing: $file" }
@@ -506,6 +511,31 @@ switch ($Phase) {
             $mockBundleVerify = { param($file, $bundle, $sha) $script:verifiedPackages++ }
             Confirm-SignedProvenanceBundle -Path $provenance -Packages @($original, $signed) -Commit $expectedSha -Verify $mockBundleVerify
             if ($script:verifiedPackages -ne 2) { throw "Provenance did not verify both packages." }
+
+            # Missing, null, empty, or malformed DSSE signatures must fail
+            # before running the cryptographic verification command.
+            $invalidBundles = @(
+                '{"dsseEnvelope":{"payload":"Zm9v"},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":null},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":[]},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":[null]},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":[{"sig":""}]},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":[{"sig":"   "}]},"verificationMaterial":{"x":1}}',
+                '{"dsseEnvelope":{"payload":"Zm9v","signatures":{"sig":"dGVzdA=="}},"verificationMaterial":{"x":1}}',
+                '{malformed json'
+            )
+            foreach ($invalidBundle in $invalidBundles) {
+                [IO.File]::WriteAllText($provenance, ($invalidBundle + [Environment]::NewLine))
+                $verifiedBefore = $script:verifiedPackages
+                $rejected = $false
+                try {
+                    Confirm-SignedProvenanceBundle -Path $provenance -Packages @($original) -Commit $expectedSha -Verify $mockBundleVerify
+                } catch { $rejected = $true }
+                if (-not $rejected -or $script:verifiedPackages -ne $verifiedBefore) {
+                    throw "Malformed or unsigned DSSE bundle passed shape validation."
+                }
+            }
+            [IO.File]::WriteAllText($provenance, ($validBundle + [Environment]::NewLine))
             $invalidRejected = $false
             [IO.File]::WriteAllText($provenance, ('{"unexpected":"not signed"}' + [Environment]::NewLine))
             try {

@@ -113,10 +113,20 @@ jobs:
           if (-not (Test-Path -LiteralPath $env:SIGNED_BUNDLE -PathType Leaf)) {
             throw 'The signed provenance bundle is missing from the attestation action.'
           }
-          $bundle = Get-Content -LiteralPath $env:SIGNED_BUNDLE -Raw | ConvertFrom-Json
+          try {
+            $bundle = Get-Content -LiteralPath $env:SIGNED_BUNDLE -Raw -ErrorAction Stop |
+              ConvertFrom-Json -ErrorAction Stop
+          } catch {
+            throw "Attestation action returned malformed Sigstore bundle JSON: $_"
+          }
           if (-not $bundle.dsseEnvelope -or -not $bundle.verificationMaterial -or
-              -not $bundle.dsseEnvelope.payload -or @($bundle.dsseEnvelope.signatures).Count -lt 1) {
-            throw 'Attestation action returned an invalid Sigstore bundle.'
+              -not $bundle.dsseEnvelope.payload -or
+              -not ($bundle.dsseEnvelope.signatures -is [array]) -or
+              $bundle.dsseEnvelope.signatures.Count -lt 1 -or
+              @($bundle.dsseEnvelope.signatures | Where-Object {
+                $null -eq $_ -or -not ($_.sig -is [string]) -or [string]::IsNullOrWhiteSpace($_.sig)
+              }).Count -gt 0) {
+            throw 'Attestation action returned a Sigstore bundle without valid DSSE signatures.'
           }
           $provenance = Join-Path (Get-Location) "artifacts/WinCfApiWrapper.$env:BUILD_VERSION.intoto.jsonl"
           # The Sigstore bundle is a single JSON object; one compact JSON line
