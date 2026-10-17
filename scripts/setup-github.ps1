@@ -19,9 +19,9 @@ function Invoke-Gh {
     return $output
 }
 
-$null = Invoke-Gh @("auth", "status")
+$null = Invoke-Gh -Arguments @("auth", "status")
 $allRules = ConvertFrom-Json -InputObject (
-    (Invoke-Gh @("api", "repos/$repository/rulesets")) -join "`n"
+    (Invoke-Gh -Arguments @("api", "repos/$repository/rulesets")) -join "`n"
 )
 $masterRules = @($allRules | Where-Object {
     $_.name -eq "master: require PR and Windows CI" -and $_.target -eq "branch"
@@ -32,11 +32,11 @@ if ($masterRules.Count -gt 1) {
 }
 if ($masterRules.Count -eq 1) {
     $ruleId = $masterRules[0].id
-    $null = Invoke-Gh @("api", "--method", "PUT",
+    $null = Invoke-Gh -Arguments @("api", "--method", "PUT",
         "repos/$repository/rulesets/$ruleId", "--input", $masterConfig)
     Write-Host "Updated master ruleset #$ruleId"
 } else {
-    $null = Invoke-Gh @("api", "--method", "POST",
+    $null = Invoke-Gh -Arguments @("api", "--method", "POST",
         "repos/$repository/rulesets", "--input", $masterConfig)
     Write-Host "Created master ruleset"
 }
@@ -44,19 +44,19 @@ if ($masterRules.Count -eq 1) {
 # An existing v* ruleset should not be replaced merely to add automation.
 # Validate the required safeguards, creating it only if absent.
 $allRules = ConvertFrom-Json -InputObject (
-    (Invoke-Gh @("api", "repos/$repository/rulesets")) -join "`n"
+    (Invoke-Gh -Arguments @("api", "repos/$repository/rulesets")) -join "`n"
 )
 $tagRules = @($allRules | Where-Object {
     $_.target -eq "tag" -and $_.name -eq "v*"
 })
 if ($tagRules.Count -eq 0) {
-    $null = Invoke-Gh @("api", "--method", "POST",
+    $null = Invoke-Gh -Arguments @("api", "--method", "POST",
         "repos/$repository/rulesets",
         "--input", (Join-Path $rulesRoot "release-tags.json"))
     Write-Host "Created v* tag ruleset"
 } elseif ($tagRules.Count -eq 1) {
     $tag = ConvertFrom-Json -InputObject (
-        (Invoke-Gh @("api", "repos/$repository/rulesets/$($tagRules[0].id)")) -join "`n"
+        (Invoke-Gh -Arguments @("api", "repos/$repository/rulesets/$($tagRules[0].id)")) -join "`n"
     )
     $kinds = @($tag.rules | ForEach-Object { $_.type })
     $required = @("deletion", "non_fast_forward", "update")
@@ -78,7 +78,7 @@ $temp = New-TemporaryFile
 try {
     [System.IO.File]::WriteAllText($temp.FullName, $environment,
         [System.Text.UTF8Encoding]::new($false))
-    $null = Invoke-Gh @("api", "--method", "PUT",
+    $null = Invoke-Gh -Arguments @("api", "--method", "PUT",
         "repos/$repository/environments/nuget", "--input", $temp.FullName)
 } finally {
     Remove-Item $temp.FullName -ErrorAction SilentlyContinue
@@ -86,7 +86,7 @@ try {
 Write-Host "Configured nuget environment to permit protected branches"
 
 if ($NuGetUser.Trim() -ne "") {
-    $null = Invoke-Gh @("variable", "set", "NUGET_USER",
+    $null = Invoke-Gh -Arguments @("variable", "set", "NUGET_USER",
         "--repo", $repository, "--body", $NuGetUser.Trim())
     Write-Host "Set NUGET_USER Actions variable"
 } else {
