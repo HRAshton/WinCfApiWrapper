@@ -98,5 +98,11 @@ dotnet test tests/WinCfApiWrapper.Tests -c Release
 dotnet test tests/WinCfApiWrapper.Tests -c Release -f net8.0-windows --settings tests/coverage.runsettings --collect "Code Coverage"
 ```
 
+The unit suite includes FsCheck property-based fuzz tests for path containment, traversal rejection,
+and transfer-range alignment and bounds. Each property runs 1,000 generated cases on both runtimes
+in CI. Failures report a replay seed and shrink the input to a smaller counterexample. To run only
+these tests, add `--filter FullyQualifiedName~InputBoundaryProperties` to the unit test command.
+OpenSSF Scorecard recognizes FsCheck for its Fuzzing check.
+
 The coverage run excludes generated Windows bindings and native Cloud Files adapters. Native integration tests require
 Windows Cloud Files support and permission to register sync roots.
