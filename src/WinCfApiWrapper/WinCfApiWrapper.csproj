@@ -5,12 +5,6 @@
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <PackageId>WinCfApiWrapper</PackageId>
         <Description>Content-container wrapper for the Windows Cloud Files API.</Description>
-        <Authors>HRAshton</Authors>
-        <PackageLicenseExpression>0BSD</PackageLicenseExpression>
-        <PackageProjectUrl>https://github.com/HRAshton/WinCfApiWrapper</PackageProjectUrl>
-        <RepositoryUrl>https://github.com/HRAshton/WinCfApiWrapper</RepositoryUrl>
-        <RepositoryType>git</RepositoryType>
-        <PublishRepositoryUrl>true</PublishRepositoryUrl>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <PackageTags>cloud-files;cfapi;windows;sync-root;virtual-filesystem;zip</PackageTags>
         <IncludeSymbols>true</IncludeSymbols>
