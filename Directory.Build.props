@@ -5,6 +5,14 @@
         <EnableWindowsTargeting>true</EnableWindowsTargeting>
         <PlatformTarget>x64</PlatformTarget>
     </PropertyGroup>
+    <PropertyGroup>
+        <Authors>HRAshton</Authors>
+        <PackageLicenseExpression>0BSD</PackageLicenseExpression>
+        <PackageProjectUrl>https://github.com/HRAshton/WinCfApiWrapper</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/HRAshton/WinCfApiWrapper</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    </PropertyGroup>
     <ItemGroup>
         <PackageReference Include="StyleCop.Analyzers">
             <PrivateAssets>all</PrivateAssets>
