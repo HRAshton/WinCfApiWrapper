@@ -42,6 +42,10 @@ jobs:
             throw 'Release transaction script has PowerShell syntax errors'
           }
 
+      - name: Test release retry package integrity checks
+        shell: pwsh
+        run: ./scripts/release-transaction.ps1 -Phase SelfTest
+
       - name: Validate GitVersion configuration
         shell: pwsh
         run: |
