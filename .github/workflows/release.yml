@@ -82,9 +82,9 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
 
-      - name: Restore
+      - name: Restore unit tests and library
         if: steps.changes.outputs.changed == 'true'
-        run: dotnet restore WinCfApiWrapper.slnx
+        run: dotnet restore tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj
 
       - name: Unit tests
         if: steps.changes.outputs.changed == 'true'
