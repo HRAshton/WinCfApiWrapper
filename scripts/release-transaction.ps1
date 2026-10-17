@@ -3,7 +3,7 @@
 # A retry never repacks a version known to be published on nuget.org.
 param(
     [Parameter(Mandatory)]
-    [ValidateSet("Resolve", "Stage", "VerifyStage", "InspectNuGet", "PushNuGet", "Finalize", "SyntaxCheck")]
+    [ValidateSet("Resolve", "Stage", "VerifyStage", "InspectNuGet", "PushNuGet", "Finalize", "SelfTest")]
     [string]$Phase
 )
 Set-StrictMode -Version Latest
