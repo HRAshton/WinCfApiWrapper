@@ -20,7 +20,7 @@
 
 ## Versioning
 
-GitVersion 6.x uses the Mainline version strategy with stable `vX.Y.Z` release tags on `master`. `+semver: minor` and `+semver: major` in commit / squash-merge messages request larger bumps. Ordinary new commits default to patch. No changes since the last tag means no new release. If no tags exist, GitVersion calculates a first version automatically: review that version before the first release if you want a specific initial version.
+GitVersion 6.x uses the Mainline version strategy with stable `vX.Y.Z` release tags on `master`. `+semver: minor` and `+semver: major` in commit / squash-merge messages request larger bumps. Ordinary new commits default to patch. No changes since the last tag means no new release. Before the first release, `next-version: 0.1.0` anchors the initial version. Once `v0.1.0` has been published and tagged, remove the `next-version` bootstrap entry so future versions rely solely on immutable tags. Without this anchor GitVersion would use a `0.0.x` version derived from existing commits.
 
 Use **full Git history** when running GitVersion. Release tags must point at commits on `master` and should never be moved or deleted. Merge/squash practices affect which commit messages GitVersion sees. A Renovate major dependency update does **not** automatically force a major version of this library.
 
