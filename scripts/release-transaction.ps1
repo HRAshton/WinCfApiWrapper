@@ -242,6 +242,12 @@ function Confirm-SignedProvenanceBundle {
     }
 }
 
+function Test-MatchingSha256 {
+    param([string]$Path, [string]$Expected)
+    # Hex digests represent bytes, so letter casing does not affect equality.
+    return ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -eq $Expected)
+}
+
 function Test-CompleteReleaseStage {
     param([string[]]$AssetNames, [string]$Version)
     foreach ($required in @(
@@ -289,8 +295,7 @@ function Read-StagedManifest {
         }
         $path = Join-Path $stageDir $asset.name
         if (-not (Test-Path $path)) { throw "Cannot download staged $($asset.name)" }
-        $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
-        if ($actual -cne $asset.sha256) { throw "Staged asset SHA256 mismatch: $($asset.name)" }
+        if (-not (Test-MatchingSha256 -Path $path -Expected $asset.sha256)) { throw "Staged asset SHA256 mismatch: $($asset.name)" }
         Invoke-Cli "gh" @("attestation", "verify", $path, "--repo", $repo, "--signer-workflow", $signer, "--source-ref", "refs/heads/master", "--source-digest", $commit) | Out-Null
     }
     $nupkg = @($manifest.packages | Where-Object { $_.name.EndsWith(".nupkg") })[0]
@@ -305,7 +310,7 @@ function Read-StagedManifest {
     }
     $provenanceFile = Join-Path $stageDir $provenanceName
     if (-not (Test-Path -LiteralPath $provenanceFile -PathType Leaf) -or
-        (Get-FileHash -LiteralPath $provenanceFile -Algorithm SHA256).Hash -cne $manifest.provenance.sha256) {
+        -not (Test-MatchingSha256 -Path $provenanceFile -Expected $manifest.provenance.sha256)) {
         throw "Signed provenance asset does not match the staged manifest."
     }
     $packageFiles = @($manifest.packages | ForEach-Object { Join-Path $stageDir $_.name })
@@ -361,6 +366,13 @@ switch ($Phase) {
                         try { $writer.Write("signature") } finally { $writer.Dispose() }
                     }
                 } finally { $zip.Dispose() }
+            }
+            # Case-only digest differences are valid; distinct bytes are not.
+            $originalDigest = (Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash
+            if (-not (Test-MatchingSha256 -Path $original -Expected $originalDigest.ToLowerInvariant()) -or
+                -not (Test-MatchingSha256 -Path $original -Expected $originalDigest.ToUpperInvariant()) -or
+                (Test-MatchingSha256 -Path $signed -Expected $originalDigest)) {
+                throw "SHA256 comparison must ignore case without accepting different bytes."
             }
             Assert-SamePackagePayload -Original $original -Published $signed
             $rejected = $false
