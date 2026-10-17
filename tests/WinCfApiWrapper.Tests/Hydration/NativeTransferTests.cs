@@ -121,6 +121,57 @@ public sealed class NativeTransferTests
     }
 
     [Fact]
+    public void TransferComplete_SuccessfulRangeTransfersPinnedBytesOnce()
+    {
+        var calls = new List<TransferCall>();
+        var transfer = new NativeTransfer(
+            (_, parameters) =>
+            {
+                byte[] transferred = new byte[4];
+                Marshal.Copy(parameters.Buffer, transferred, 0, transferred.Length);
+                Assert.Equal(new byte[] { 1, 2, 3, 4 }, transferred);
+                calls.Add(parameters);
+            }
+        );
+        using FetchRequest request = Request(0, 4, 4);
+        byte[] buffer = [1, 2, 3, 4];
+
+        Assert.True(transfer.Complete(request, buffer, buffer.Length, 0));
+        Assert.False(transfer.Complete(request, buffer, buffer.Length, 0));
+
+        TransferCall call = Assert.Single(calls);
+        Assert.NotEqual(nint.Zero, call.Buffer);
+        Assert.Equal(0, call.Offset);
+        Assert.Equal(4, call.Length);
+        Assert.Equal(0, call.CompletionStatus);
+        Assert.Empty(request.Pending());
+    }
+
+    [Fact]
+    public void TransferComplete_NativeFailureLeavesRangePendingAndMarksCompletionUnknown()
+    {
+        var transfer = new NativeTransfer((_, _) => throw new IOException("native failure"));
+        using FetchRequest request = Request(0, 4, 4);
+
+        Assert.Throws<IOException>(() => transfer.Complete(request, [1, 2, 3, 4], 4, 0));
+
+        Assert.True(request.NativeCompletionFailed);
+        Assert.Equal(new TransferRange(0, 4), Assert.Single(request.Pending()));
+    }
+
+    [Fact]
+    public void TransferFailure_WhenRequestWasCanceledAndHasNoPendingRanges_DoesNotSubmitAgain()
+    {
+        int calls = 0;
+        var transfer = new NativeTransfer((_, _) => calls++);
+        using FetchRequest request = Request(0, 4096, 4096);
+        request.Cancel(0, 4096);
+
+        Assert.False(transfer.Fail(request));
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
     public void TransferComplete_UnalignedRange_RejectsBeforeNativeCall()
     {
         int calls = 0;

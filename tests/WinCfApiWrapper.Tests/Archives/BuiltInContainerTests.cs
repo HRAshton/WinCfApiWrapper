@@ -64,6 +64,33 @@ public sealed class BuiltInContainerTests
         );
     }
 
+    [Fact]
+    public async Task BufferedContainer_OpenReadRequiresItsIndexedSnapshot()
+    {
+        byte[] encoded = Encode(
+            Encoding.UTF8.GetBytes("payload"),
+            stream => new GZipStream(stream, CompressionLevel.Optimal, true)
+        );
+        var container = new GZipContainer(_ => new MemoryStream(encoded));
+        var unindexedEntry = new ContainerEntry("payload.bin", 7, "version");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await container.OpenReadAsync(unindexedEntry)
+        );
+
+        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync());
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await container.OpenReadAsync(entry with { Version = "stale" })
+        );
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await container.OpenReadAsync(entry with { Length = entry.Length + 1 })
+        );
+
+        await using Stream contents = await container.OpenReadAsync(entry);
+        using var reader = new StreamReader(contents);
+        Assert.Equal("payload", await reader.ReadToEndAsync());
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -90,6 +117,24 @@ public sealed class BuiltInContainerTests
     {
         byte[] archive = BuildTar(false, "../escape.txt");
         var container = new TarContainer(_ => new MemoryStream(archive));
+
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await container.GetEntriesAsync()
+        );
+    }
+
+    [Fact]
+    public async Task TarContainer_RejectsLinksInsteadOfExposingThemAsFiles()
+    {
+        using var output = new MemoryStream();
+        using (var writer = new TarWriter(output, true))
+        {
+            writer.WriteEntry(
+                new PaxTarEntry(TarEntryType.SymbolicLink, "link") { LinkName = "target" }
+            );
+        }
+
+        var container = new TarContainer(_ => new MemoryStream(output.ToArray()));
 
         await Assert.ThrowsAsync<InvalidDataException>(async () =>
             await container.GetEntriesAsync()
