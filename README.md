@@ -10,4 +10,4 @@ A .NET library for exposing caller-provided content containers as Windows Cloud 
 
 See [the library README](src/WinCfApiWrapper/README.md) for usage, the container contract, and mount lifecycle details.
 
-Releases are versioned with GitVersion and published to NuGet on Thursdays only when `master` has new commits. See [release automation and provenance](docs/RELEASING.md) for the setup and verification steps.
+Releases are versioned with GitVersion and published to NuGet on Thursdays only when `master` has new commits.

@@ -52,8 +52,27 @@ jobs:
       - name: Compile native integration tests
         run: dotnet build tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
 
-      - name: Unit tests
-        run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-build --no-restore
+      - name: Unit tests and coverage
+        run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-build --no-restore --collect "Code Coverage" --settings tests/coverage.runsettings --results-directory TestResults
+
+      - name: Report line coverage
+        shell: pwsh
+        run: |
+          $report = Get-ChildItem TestResults -Filter '*.cobertura.xml' -Recurse |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $report) { throw "No Cobertura report was generated" }
+          [xml]$coverage = Get-Content $report.FullName -Raw
+          $rate = [double]::Parse($coverage.coverage.'line-rate', [System.Globalization.CultureInfo]::InvariantCulture)
+          $pct = [math]::Round($rate * 100, 2)
+          Write-Host "Unit-test line coverage: $pct%"
+          "### Unit-test line coverage: $pct%" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-coverage
+          path: TestResults/**/*.cobertura.xml
+          if-no-files-found: error
 
       - name: Verify NuGet package
         run: dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true --output artifacts
