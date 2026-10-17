@@ -1,0 +1,138 @@
+name: Publish NuGet
+
+on:
+  schedule:
+    - cron: '17 12 * * 4'
+      timezone: 'Europe/Belgrade'
+  workflow_dispatch:
+
+concurrency:
+  group: nuget-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/master'
+    name: Build, attest and publish
+    runs-on: windows-latest
+    environment: nuget
+
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - name: Checkout full Git history and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check for commits since last version tag
+        id: changes
+        shell: pwsh
+        run: |
+          $lastTag = git tag --list 'v*' --sort=-version:refname |
+            Where-Object { $_ -match '^v[0-9]+\.[0-9]+\.[0-9]+$' } |
+            Select-Object -First 1
+          if ($lastTag) {
+            git merge-base --is-ancestor $lastTag HEAD
+            if ($LASTEXITCODE -ne 0) {
+              throw "Latest stable release tag $lastTag is not an ancestor of master."
+            }
+            $releasedSha = (git rev-list -n 1 $lastTag).Trim()
+            $headSha = (git rev-parse HEAD).Trim()
+            if ($releasedSha -eq $headSha) {
+              "changed=false" >> $env:GITHUB_OUTPUT
+              Write-Host "master is already released at $lastTag ($headSha)."
+              exit 0
+            }
+          }
+          "changed=true" >> $env:GITHUB_OUTPUT
+
+      - name: Set up .NET
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install pinned GitVersion
+        if: steps.changes.outputs.changed == 'true'
+        shell: pwsh
+        run: dotnet tool install --global GitVersion.Tool --version 6.8.2
+
+      - name: Determine release version
+        if: steps.changes.outputs.changed == 'true'
+        id: version
+        shell: pwsh
+        run: |
+          $version = (dotnet-gitversion /showvariable SemVer /config GitVersion.yml | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "GitVersion did not produce a stable SemVer: $version"
+          }
+          $tag = "v$version"
+          if (git tag --list $tag) {
+            throw "Tag $tag already exists but master has unreleased commits. Check GitVersion configuration."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Restore
+        if: steps.changes.outputs.changed == 'true'
+        run: dotnet restore WinCfApiWrapper.slnx
+
+      - name: Unit tests
+        if: steps.changes.outputs.changed == 'true'
+        run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Pack release (single build)
+        if: steps.changes.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          dotnet pack src/WinCfApiWrapper/WinCfApiWrapper.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true "-p:Version=${{ steps.version.outputs.version }}" --output artifacts
+          if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed" }
+
+      # Required, not best effort. For private repositories this requires
+      # GitHub Enterprise Cloud; otherwise publish after making the repo public.
+      - name: Attest exact build artifacts
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/attest@v4
+        with:
+          subject-path: 'artifacts/*'
+
+      - name: NuGet Trusted Publishing login
+        if: steps.changes.outputs.changed == 'true'
+        id: nuget
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }
+
+      - name: Push to nuget.org
+        if: steps.changes.outputs.changed == 'true'
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }
+        run: |
+          if (-not $env:NUGET_API_KEY) { throw "NuGet Trusted Publishing did not return an API key" }
+          $package = Get-ChildItem artifacts -Filter '*.nupkg' | Select-Object -First 1
+          if (-not $package) { throw "No package to publish" }
+          dotnet nuget push $package.FullName --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json
+          if ($LASTEXITCODE -ne 0) { throw "NuGet publishing failed" }
+
+      # NuGet.org adds a repository signature, changing the downloaded package
+      # bytes. Keep the original attested files on the GitHub Release.
+      - name: Create GitHub Release with attested artifacts
+        if: steps.changes.outputs.changed == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }
+          RELEASE_TAG: ${{ steps.version.outputs.tag }
+        run: |
+          $assets = @(Get-ChildItem artifacts -File | ForEach-Object { $_.FullName })
+          gh release create $env:RELEASE_TAG @assets --target $env:GITHUB_SHA --generate-notes --title $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw "NuGet was published, but GitHub Release creation failed. See docs/RELEASING.md for recovery." }

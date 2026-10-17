@@ -1,0 +1,11 @@
+# GitVersion 6.x: master is the single release branch.
+# Release tags (vX.Y.Z) anchor subsequent calculations.
+workflow: GitHubFlow/v1
+mode: Mainline
+tag-prefix: '[vV]'
+branches:
+  main:
+    regex: ^master$
+    label: ''
+    increment: Patch
+    is-main-branch: true

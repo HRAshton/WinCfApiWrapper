@@ -1,0 +1,26 @@
+name: Native integration tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Cloud Files integration (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # These tests use the native Windows Cloud Files subsystem.
+      # Run manually first; hosted runners may lack the required privileges.
+      - name: Native integration tests
+        run: dotnet test tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj --configuration Release
