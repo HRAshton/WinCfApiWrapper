@@ -46,6 +46,9 @@ The checkbox becomes available once the workflow change is on the default branch
 Attested release builds always enable the archive stress test on both runtimes;
 a failure blocks packaging, just like a failed live test.
 
+Normal unit tests check a 10,000-entry limit at the boundary and accept 12,000
+entries with a raised limit. The public default remains 250,000 archive entries.
+
 ## Coverage
 
 ```powershell

@@ -25,7 +25,7 @@ public sealed class ZipCatalogTests
     public void Constructor_ValidArchive_IndexesFilesAndDirectories()
     {
         using MemoryStream stream = BuildArchive("dir/a.txt", "dir/nested/b.txt");
-        var catalog = new ZipCatalog(stream);
+        var catalog = new ZipCatalog(stream, maxEntries: 2);
         Assert.True(catalog.Contains("dir/a.txt"));
         Assert.Contains(@"dir\nested", catalog.Directories);
         Assert.Equal(2, catalog.Entries.Count);
@@ -37,7 +37,7 @@ public sealed class ZipCatalogTests
     {
         MemoryStream stream = BuildArchive("dir/a.txt");
 
-        var catalog = new ZipCatalog(stream);
+        var catalog = new ZipCatalog(stream, maxEntries: 1);
 
         Assert.False(stream.CanRead);
         Assert.True(catalog.Contains("dir/a.txt"));
@@ -47,7 +47,7 @@ public sealed class ZipCatalogTests
     public void Constructor_DuplicateCaseInsensitivePath_Throws()
     {
         using MemoryStream stream = BuildArchive("a.txt", "A.txt");
-        Assert.Throws<InvalidDataException>(() => new ZipCatalog(stream));
+        Assert.Throws<InvalidDataException>(() => new ZipCatalog(stream, maxEntries: 2));
         Assert.False(stream.CanRead);
     }
 
@@ -55,7 +55,7 @@ public sealed class ZipCatalogTests
     public void Constructor_FileConflictsWithDirectory_Throws()
     {
         using MemoryStream stream = BuildArchive("folder", "folder/file.txt");
-        Assert.Throws<InvalidDataException>(() => new ZipCatalog(stream));
+        Assert.Throws<InvalidDataException>(() => new ZipCatalog(stream, maxEntries: 2));
     }
 
     [Fact]
@@ -65,8 +65,8 @@ public sealed class ZipCatalogTests
         using (MemoryStream stream = BuildArchive("a.txt"))
             bytes = stream.ToArray();
 
-        var first = new ZipCatalog(new MemoryStream(bytes));
-        var second = new ZipCatalog(new MemoryStream(bytes));
+        var first = new ZipCatalog(new MemoryStream(bytes), maxEntries: 1);
+        var second = new ZipCatalog(new MemoryStream(bytes), maxEntries: 1);
         Assert.Equal(first.Fingerprint, second.Fingerprint);
     }
 
@@ -80,8 +80,8 @@ public sealed class ZipCatalogTests
 
         secondStream.Position = 0;
 
-        var first = new ZipCatalog(firstStream);
-        var second = new ZipCatalog(secondStream);
+        var first = new ZipCatalog(firstStream, maxEntries: 1);
+        var second = new ZipCatalog(secondStream, maxEntries: 1);
         Assert.NotEqual(first.Fingerprint, second.Fingerprint);
     }
 

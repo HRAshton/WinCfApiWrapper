@@ -10,6 +10,9 @@ namespace WinCfApiWrapper.Tests.Archives;
 
 public sealed class ArchiveResourceLimitsTests
 {
+    public static bool RunArchiveStress =>
+        Environment.GetEnvironmentVariable("RZM_RUN_ARCHIVE_STRESS") == "1";
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -163,19 +166,43 @@ public sealed class ArchiveResourceLimitsTests
         Assert.Equal("payload", await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(10_000, 10_000, true)]
+    [InlineData(10_001, 10_000, false)]
+    [InlineData(12_000, 12_000, true)]
+    public async Task Zip_EnforcesConfiguredEntryBudget(int fileCount, int maxEntries, bool accepted)
+    {
+        byte[] archive = MakeZip(fileCount);
+        var container = new ZipContainer(
+            _ => new MemoryStream(archive),
+            new ArchiveResourceLimits { MaxEntries = maxEntries }
+        );
+
+        if (!accepted)
+        {
+            await Assert.ThrowsAsync<InvalidDataException>(async () =>
+                await container.GetEntriesAsync(TestContext.Current.CancellationToken)
+            );
+            return;
+        }
+
+        IReadOnlyCollection<ContainerEntry> entries = await container.GetEntriesAsync(
+            TestContext.Current.CancellationToken
+        );
+        Assert.Equal(fileCount, entries.Count);
+        Assert.Contains(entries, entry => entry.RelativePath == $"file-{fileCount - 1:D6}.txt");
+    }
+
+    [Fact(
+        Skip = "Set RZM_RUN_ARCHIVE_STRESS=1 to run archive stress tests.",
+        SkipUnless = nameof(RunArchiveStress)
+    )]
+    [Trait("Category", "ArchiveStress")]
     public async Task Zip_DefaultLimits_IndexTwoHundredThousandFiles()
     {
         const int fileCount = 200_000;
 
-        using var output = new MemoryStream();
-        using (var writer = new ZipArchive(output, ZipArchiveMode.Create, true))
-        {
-            for (int i = 0; i < fileCount; i++)
-                writer.CreateEntry($"file-{i:D6}.txt");
-        }
-
-        byte[] archive = output.ToArray();
+        byte[] archive = MakeZip(fileCount);
         var container = new ZipContainer(_ => new MemoryStream(archive));
 
         IReadOnlyCollection<ContainerEntry> entries = await container.GetEntriesAsync(
@@ -225,22 +252,22 @@ public sealed class ArchiveResourceLimitsTests
             await container.GetEntriesAsync(TestContext.Current.CancellationToken));
     }
 
-    private sealed class TestBufferedContainer(
-        ArchiveResourceLimits limits,
-        params BufferedEntry[] decoded
-    ) : BufferedContainer(limits)
-    {
-        protected override IEnumerable<BufferedEntry> Decode(CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return decoded;
-        }
-    }
-
     private static IContentContainer CreateTar(bool gzip, byte[] bytes, ArchiveResourceLimits limits)
         => gzip
             ? new TarGZipContainer(_ => new MemoryStream(bytes), limits)
             : new TarContainer(_ => new MemoryStream(bytes), limits);
+
+    private static byte[] MakeZip(int fileCount)
+    {
+        using var output = new MemoryStream();
+        using (var writer = new ZipArchive(output, ZipArchiveMode.Create, true))
+        {
+            for (int i = 0; i < fileCount; i++)
+                writer.CreateEntry($"file-{i:D6}.txt");
+        }
+
+        return output.ToArray();
+    }
 
     private static byte[] MakeTar(bool gzip)
     {
@@ -262,5 +289,17 @@ public sealed class ArchiveResourceLimitsTests
         }
 
         return output.ToArray();
+    }
+
+    private sealed class TestBufferedContainer(
+        ArchiveResourceLimits limits,
+        params BufferedEntry[] decoded
+    ) : BufferedContainer(limits)
+    {
+        protected override IEnumerable<BufferedEntry> Decode(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return decoded;
+        }
     }
 }

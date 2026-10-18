@@ -13,7 +13,7 @@ internal sealed class ZipCatalog
         StringComparer.OrdinalIgnoreCase
     );
 
-    public ZipCatalog(Stream stream, int maxEntries = 250_000)
+    public ZipCatalog(Stream stream, int maxEntries)
     {
         using Stream ownedStream = stream ?? throw new ArgumentNullException(nameof(stream));
         if (maxEntries <= 0)

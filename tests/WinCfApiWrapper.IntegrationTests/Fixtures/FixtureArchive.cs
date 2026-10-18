@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using WinCfApiWrapper.Archives;
 using WinCfApiWrapper.Mounting;
+using WinCfApiWrapper.Public.Containers;
 
 namespace WinCfApiWrapper.IntegrationTests.Fixtures;
 
@@ -20,7 +21,7 @@ internal static class FixtureArchive
 
     public static string MountedRoot(string baseRoot)
     {
-        var catalog = new ZipCatalog(File.OpenRead(LocalPath));
+        var catalog = new ZipCatalog(File.OpenRead(LocalPath), new ArchiveResourceLimits().MaxEntries);
 
         return MountPath.For(baseRoot, catalog.Fingerprint);
     }

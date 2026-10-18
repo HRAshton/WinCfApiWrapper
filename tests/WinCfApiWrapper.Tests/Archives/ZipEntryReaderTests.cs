@@ -10,7 +10,7 @@ public sealed class ZipEntryReaderTests
     public void OpenEntry_UnchangedArchive_ReturnsContentAndOwnsSource()
     {
         byte[] bytes = BuildArchive("docs/one.txt", "content");
-        var catalog = new ZipCatalog(new MemoryStream(bytes));
+        var catalog = new ZipCatalog(new MemoryStream(bytes), maxEntries: 1);
         ZipEntryInfo entry = catalog.Entries["docs\\one.txt"];
         var source = new MemoryStream(bytes);
 
@@ -25,7 +25,7 @@ public sealed class ZipEntryReaderTests
     public void OpenEntry_ChangedMetadata_RejectsArchive()
     {
         byte[] original = BuildArchive("docs/one.txt", "original");
-        var catalog = new ZipCatalog(new MemoryStream(original));
+        var catalog = new ZipCatalog(new MemoryStream(original), maxEntries: 1);
         ZipEntryInfo entry = catalog.Entries["docs\\one.txt"];
         using var reader = new ZipEntryReader(
             new MemoryStream(BuildArchive("docs/one.txt", "changed content"))
@@ -38,7 +38,7 @@ public sealed class ZipEntryReaderTests
     public void OpenEntry_MissingMember_ThrowsFileNotFound()
     {
         byte[] original = BuildArchive("docs/one.txt", "content");
-        var catalog = new ZipCatalog(new MemoryStream(original));
+        var catalog = new ZipCatalog(new MemoryStream(original), maxEntries: 1);
         ZipEntryInfo entry = catalog.Entries["docs\\one.txt"];
         using var reader = new ZipEntryReader(
             new MemoryStream(BuildArchive("docs/two.txt", "content"))
