@@ -20,7 +20,7 @@ Important boundaries are: **untrusted archive/remote content -> container parser
 
 ### Resource exhaustion and malicious archives
 
-ZIP/TAR inputs can contain huge numbers of entries, extreme decompression ratios, oversized files, invalid metadata, and expensive read patterns. TAR and single-file compressed containers buffer decoded data in memory. There is **no general configurable cap** on the total uncompressed archive size, entry count, or process-memory usage in the current public API. For untrusted inputs, prevalidate sizes/counts and apply limits upstream, or use an isolated worker with OS-enforced resource budgets.
+ZIP/TAR inputs can contain huge numbers of entries, extreme decompression ratios, oversized files, invalid metadata, and expensive read patterns. TAR and single-file compressed containers buffer decoded data in memory. Built-in buffered containers now apply configurable decoded-byte and entry-count budgets via `ArchiveResourceLimits` (defaults: 256 MiB and 10,000 entries). ZIP indexing applies an entry-count budget, but streaming ZIP hydration does not enforce a total decompressed-byte cap. These are not exact process-memory or CPU budgets: allocations can exceed decoded output, and a malicious stream may consume work before failing. For untrusted inputs, also prevalidate sources and consider a separate worker with OS-enforced resource budgets.
 
 ### Identity and source immutability
 

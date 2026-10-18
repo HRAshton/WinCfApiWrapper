@@ -1,3 +1,5 @@
+using WinCfApiWrapper.Public.Containers;
+
 namespace WinCfApiWrapper.Containers.Base;
 
 /// <summary>Base class for containers that decode one compressed stream into a single file.</summary>
@@ -9,10 +11,13 @@ public abstract class CompressedContainer : BufferedContainer
     /// <summary>Initializes a new instance of the <see cref="CompressedContainer" /> class.</summary>
     /// <param name="openCompressedStream">A factory that returns a readable compressed stream.</param>
     /// <param name="entryName">The file name exposed inside the mount.</param>
+    /// <param name="limits">Optional decoding resource limits.</param>
     protected CompressedContainer(
         Func<CancellationToken, Stream> openCompressedStream,
-        string entryName = "content"
+        string entryName = "content",
+        ArchiveResourceLimits? limits = null
     )
+        : base(limits)
     {
         _openCompressedStream =
             openCompressedStream ?? throw new ArgumentNullException(nameof(openCompressedStream));
@@ -42,6 +47,8 @@ public abstract class CompressedContainer : BufferedContainer
         while ((read = decoder.Read(buffer, 0, buffer.Length)) != 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (read > Limits.MaxBufferedBytes - content.Length)
+                throw new InvalidDataException("Compressed content exceeds maximum buffered byte count.");
             content.Write(buffer, 0, read);
         }
 

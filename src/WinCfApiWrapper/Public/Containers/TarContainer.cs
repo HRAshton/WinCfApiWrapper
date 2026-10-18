@@ -5,7 +5,11 @@ namespace WinCfApiWrapper.Public.Containers;
 
 /// <summary>Exposes the regular files and directories in a TAR archive.</summary>
 /// <param name="openArchive">A factory that returns a readable TAR stream.</param>
-public sealed class TarContainer(Func<CancellationToken, Stream> openArchive) : BufferedContainer
+/// <param name="limits">Optional limits on total decoded bytes and entries.</param>
+public sealed class TarContainer(
+    Func<CancellationToken, Stream> openArchive,
+    ArchiveResourceLimits? limits = null
+) : BufferedContainer(limits)
 {
     private readonly Func<CancellationToken, Stream> _openArchive =
         openArchive ?? throw new ArgumentNullException(nameof(openArchive));
@@ -18,7 +22,7 @@ public sealed class TarContainer(Func<CancellationToken, Stream> openArchive) : 
             cancellationToken,
             "TAR"
         );
-        foreach (BufferedEntry entry in TarArchiveDecoder.Read(stream, cancellationToken))
+        foreach (BufferedEntry entry in TarArchiveDecoder.Read(stream, cancellationToken, Limits))
             yield return entry;
     }
 }
