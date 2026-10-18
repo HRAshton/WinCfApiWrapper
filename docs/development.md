@@ -30,6 +30,22 @@ dotnet test tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTe
 
 `tests/WinCfApiWrapper.Tests/Fuzzing/InputBoundaryProperties.cs` uses FsCheck to generate inputs for path and transfer-range checks. Archive parsers require separate coverage-guided fuzzing.
 
+## Opt-in archive stress test
+
+The 200,000-file ZIP indexing test is skipped during normal unit runs. To run it:
+
+```powershell
+$env:RZM_RUN_ARCHIVE_STRESS = '1'
+dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj -c Release --filter "Category=ArchiveStress"
+Remove-Item Env:RZM_RUN_ARCHIVE_STRESS
+```
+
+In GitHub Actions, manually run **CI** with **Run archive stress tests** checked.
+This enables the test on both runtimes. Normal pull-request and push runs keep it skipped.
+The checkbox becomes available once the workflow change is on the default branch.
+Attested release builds always enable the archive stress test on both runtimes;
+a failure blocks packaging, just like a failed live test.
+
 ## Coverage
 
 ```powershell

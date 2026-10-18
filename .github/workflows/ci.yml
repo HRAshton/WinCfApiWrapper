@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      run_archive_stress:
+        description: Run archive stress tests
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -28,6 +34,8 @@ jobs:
   build-and-test:
     name: Build and tests (Windows, ${{ matrix.framework }})
     runs-on: windows-latest
+    env:
+      RZM_RUN_ARCHIVE_STRESS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_archive_stress && '1' || '0' }}
     strategy:
       fail-fast: false
       matrix:
