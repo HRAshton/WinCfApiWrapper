@@ -8,8 +8,8 @@ namespace WinCfApiWrapper.Public.Containers;
 /// </remarks>
 public sealed record ArchiveResourceLimits
 {
-    /// <summary>Gets the maximum number of archive entries, including directory entries.</summary>
-    public int MaxEntries { get; init; } = 10_000;
+    /// <summary>Gets the maximum number of archive entries, including directory entries (default 250,000).</summary>
+    public int MaxEntries { get; init; } = 250_000;
 
     /// <summary>Gets the maximum total decoded bytes held by buffered containers (default 256 MiB).</summary>
     public long MaxBufferedBytes { get; init; } = 256L * 1024 * 1024;
