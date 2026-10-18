@@ -10,14 +10,15 @@ public sealed class MountPathTests
     {
         string parent = Path.Combine(Path.GetTempPath(), "WinCfApiWrapper.Unit");
         string basePath = Path.Combine(parent, "sample");
-        string fingerprint = new('A', 64);
+        string fingerprint = "ABCDEF01" + new string('B', 56);
         string root = MountPath.For(basePath, fingerprint);
 
-        Assert.Equal(basePath + ".rzm-" + fingerprint, root);
+        Assert.Equal(basePath + ".rzm-abcdef01", root);
         Assert.True(MountPath.IsMount(root));
         Assert.False(MountPath.IsMount(basePath));
-        Assert.False(MountPath.IsMount(basePath + ".rzm-" + new string('A', 63)));
-        Assert.False(MountPath.IsMount(basePath + ".rzm-" + new string('G', 64)));
+        Assert.False(MountPath.IsMount(basePath + ".rzm-" + new string('G', 8)));
+        Assert.False(MountPath.IsMount(basePath + ".rzm-" + new string('A', 7)));
+        Assert.False(MountPath.IsMount(basePath + ".rzm-" + new string('A', 9)));
     }
 
     [Fact]
