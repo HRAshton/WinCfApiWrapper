@@ -13,6 +13,8 @@ public sealed class FetchFailureTests
     [Fact]
     public async Task Fetch_EntryReadFails_ConsumerReceivesIoError()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string root = FixtureArchive.Root();
         var mount = new CloudMount(
             new CloudMountOptions
@@ -26,11 +28,14 @@ public sealed class FetchFailureTests
         bool registered = false;
         try
         {
-            await mount.MountAsync();
+            await mount.MountAsync(testCancellationToken);
             registered = true;
             await Assert.ThrowsAnyAsync<IOException>(() =>
-                File.ReadAllTextAsync(Path.Combine(mount.Root, "docs", "hello.txt"))
-                    .WaitAsync(TimeSpan.FromSeconds(5))
+                File.ReadAllTextAsync(
+                        Path.Combine(mount.Root, "docs", "hello.txt"),
+                        testCancellationToken
+                    )
+                    .WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken)
             );
         }
         finally

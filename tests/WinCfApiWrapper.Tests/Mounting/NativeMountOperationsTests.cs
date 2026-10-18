@@ -9,10 +9,12 @@ public sealed class NativeMountOperationsTests
     [Fact]
     public async Task HydrateAsync_ReadsToEndAndClosesTheFileHandle()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string path = Path.GetTempFileName();
         try
         {
-            await File.WriteAllBytesAsync(path, new byte[128 * 1024]);
+            await File.WriteAllBytesAsync(path, new byte[128 * 1024], testCancellationToken);
             SafeFileHandle handle = File.OpenHandle(
                 path,
                 FileMode.Open,
@@ -21,7 +23,7 @@ public sealed class NativeMountOperationsTests
                 FileOptions.Asynchronous
             );
 
-            await new NativeMountOperations().HydrateAsync(handle, CancellationToken.None);
+            await new NativeMountOperations().HydrateAsync(handle, testCancellationToken);
 
             Assert.True(handle.IsClosed);
         }
@@ -37,7 +39,11 @@ public sealed class NativeMountOperationsTests
         string path = Path.GetTempFileName();
         try
         {
-            await File.WriteAllBytesAsync(path, new byte[128 * 1024]);
+            await File.WriteAllBytesAsync(
+                path,
+                new byte[128 * 1024],
+                TestContext.Current.CancellationToken
+            );
             SafeFileHandle handle = File.OpenHandle(
                 path,
                 FileMode.Open,

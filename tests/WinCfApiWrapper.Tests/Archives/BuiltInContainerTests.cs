@@ -40,18 +40,22 @@ public sealed class BuiltInContainerTests
         Func<Stream, Stream> createEncoder
     )
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         byte[] source = Encoding.UTF8.GetBytes("compressed payload");
         byte[] encoded = Encode(source, createEncoder);
         IContentContainer container = createContainer(_ => new MemoryStream(encoded));
 
-        IReadOnlyCollection<ContainerEntry> entries = await container.GetEntriesAsync();
+        IReadOnlyCollection<ContainerEntry> entries = await container.GetEntriesAsync(
+            testCancellationToken
+        );
         ContainerEntry entry = Assert.Single(entries);
         Assert.Equal("payload.bin", entry.RelativePath);
         Assert.Equal(source.Length, entry.Length);
 
-        await using Stream contents = await container.OpenReadAsync(entry);
+        await using Stream contents = await container.OpenReadAsync(entry, testCancellationToken);
         using var reader = new StreamReader(contents);
-        Assert.Equal("compressed payload", await reader.ReadToEndAsync());
+        Assert.Equal("compressed payload", await reader.ReadToEndAsync(testCancellationToken));
     }
 
     [Fact]
@@ -60,13 +64,15 @@ public sealed class BuiltInContainerTests
         var container = new GZipContainer(_ => new MemoryStream([1, 2, 3]));
 
         await Assert.ThrowsAnyAsync<InvalidDataException>(async () =>
-            await container.GetEntriesAsync()
+            await container.GetEntriesAsync(TestContext.Current.CancellationToken)
         );
     }
 
     [Fact]
     public async Task BufferedContainer_OpenReadRequiresItsIndexedSnapshot()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         byte[] encoded = Encode(
             Encoding.UTF8.GetBytes("payload"),
             stream => new GZipStream(stream, CompressionLevel.Optimal, true)
@@ -75,20 +81,28 @@ public sealed class BuiltInContainerTests
         var unindexedEntry = new ContainerEntry("payload.bin", 7, "version");
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await container.OpenReadAsync(unindexedEntry)
+            await container.OpenReadAsync(unindexedEntry, testCancellationToken)
         );
 
-        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync());
-        await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await container.OpenReadAsync(entry with { Version = "stale" })
+        ContainerEntry entry = Assert.Single(
+            await container.GetEntriesAsync(testCancellationToken)
         );
         await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await container.OpenReadAsync(entry with { Length = entry.Length + 1 })
+            await container.OpenReadAsync(entry with { Version = "stale" }, testCancellationToken)
+        );
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await container.OpenReadAsync(
+                entry with
+                {
+                    Length = entry.Length + 1,
+                },
+                testCancellationToken
+            )
         );
 
-        await using Stream contents = await container.OpenReadAsync(entry);
+        await using Stream contents = await container.OpenReadAsync(entry, testCancellationToken);
         using var reader = new StreamReader(contents);
-        Assert.Equal("payload", await reader.ReadToEndAsync());
+        Assert.Equal("payload", await reader.ReadToEndAsync(testCancellationToken));
     }
 
     [Theory]
@@ -96,20 +110,24 @@ public sealed class BuiltInContainerTests
     [InlineData(true)]
     public async Task TarContainer_IndexesDirectoriesAndReadsFiles(bool gzip)
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         byte[] archive = BuildTar(gzip);
         IContentContainer container = gzip
             ? new TarGZipContainer(_ => new MemoryStream(archive))
             : new TarContainer(_ => new MemoryStream(archive));
 
-        IReadOnlyCollection<ContainerEntry> entries = await container.GetEntriesAsync();
+        IReadOnlyCollection<ContainerEntry> entries = await container.GetEntriesAsync(
+            testCancellationToken
+        );
         Assert.Contains(entries, entry => entry.IsDirectory && entry.RelativePath == "docs");
         ContainerEntry file = Assert.Single(entries, entry => !entry.IsDirectory);
         Assert.Equal("docs\\hello.txt", file.RelativePath);
         Assert.Equal(5, file.Length);
 
-        await using Stream contents = await container.OpenReadAsync(file);
+        await using Stream contents = await container.OpenReadAsync(file, testCancellationToken);
         using var reader = new StreamReader(contents);
-        Assert.Equal("hello", await reader.ReadToEndAsync());
+        Assert.Equal("hello", await reader.ReadToEndAsync(testCancellationToken));
     }
 
     [Fact]
@@ -119,7 +137,7 @@ public sealed class BuiltInContainerTests
         var container = new TarContainer(_ => new MemoryStream(archive));
 
         await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await container.GetEntriesAsync()
+            await container.GetEntriesAsync(TestContext.Current.CancellationToken)
         );
     }
 
@@ -137,7 +155,7 @@ public sealed class BuiltInContainerTests
         var container = new TarContainer(_ => new MemoryStream(output.ToArray()));
 
         await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await container.GetEntriesAsync()
+            await container.GetEntriesAsync(TestContext.Current.CancellationToken)
         );
     }
 
