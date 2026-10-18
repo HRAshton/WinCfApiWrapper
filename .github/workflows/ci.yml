@@ -37,7 +37,7 @@ jobs:
       RZM_RUN_ARCHIVE_STRESS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_archive_stress && '1' || '0' }}
     permissions:
       contents: read
-      id-token: write # For Codecov OIDC on the .NET 8 matrix leg.
+      id-token: write # Granted to both matrix legs; Codecov uses it on .NET 8.
     strategy:
       fail-fast: false
       matrix:
