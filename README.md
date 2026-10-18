@@ -4,40 +4,77 @@
 [![Codecov coverage](https://codecov.io/gh/HRAshton/WinCfApiWrapper/branch/master/graph/badge.svg?flag=unittests)](https://app.codecov.io/gh/HRAshton/WinCfApiWrapper)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/HRAshton/WinCfApiWrapper/badge)](https://scorecard.dev/viewer/?uri=github.com/HRAshton/WinCfApiWrapper)
 [![REUSE status](https://api.reuse.software/badge/github.com/HRAshton/WinCfApiWrapper)](https://api.reuse.software/info/github.com/HRAshton/WinCfApiWrapper)
-[![SLSA provenance](https://img.shields.io/badge/SLSA%20provenance-verified-2ea44f)](https://github.com/HRAshton/WinCfApiWrapper/actions/runs/39067209522)
+[![SLSA provenance](https://img.shields.io/badge/SLSA%20provenance-verified-2ea44f)](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/releasing.md)
 [![NuGet](https://img.shields.io/nuget/v/WinCfApiWrapper)](https://www.nuget.org/packages/WinCfApiWrapper)
-[![0BSD License](https://img.shields.io/badge/license-0BSD-blue)](LICENSE)
+[![0BSD License](https://img.shields.io/badge/license-0BSD-blue)](https://github.com/HRAshton/WinCfApiWrapper/blob/master/LICENSE)
 ![.NET 8+](https://img.shields.io/badge/.NET-8%2B-512BD4)
 ![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D6)
 
-A .NET library for exposing caller-provided content containers as Windows Cloud Files sync roots. The built-in `ZipContainer` supports ZIP sources; callers can implement `IContentContainer` for other formats and storage systems.
+Expose a read-only content source as a Windows Cloud Files sync root. Files start as placeholders and their contents are fetched on demand. Built-in containers support ZIP, TAR, TAR.GZ, GZip, Brotli, Deflate, and ZLib; implement `IContentContainer` for other sources.
 
-See [the library README](src/WinCfApiWrapper/README.md) for usage, the container contract, and mount lifecycle details.
+## Requirements
 
-Releases are versioned with GitVersion and published to NuGet on Thursdays only when `master` has new commits.
+- Windows x64, Windows 10 version 1709 (build 16299) or later with Cloud Files support.
+- .NET 8 or later, targeting `net8.0-windows` or a later Windows target framework.
 
-## Verifying release provenance
-
-For releases built with provenance export enabled, the GitHub Release includes a
-`WinCfApiWrapper.<version>.intoto.jsonl` file alongside the NuGet and symbol
-packages. This is the authentic signed Sigstore/in-toto build-provenance bundle,
-not merely a checksum or an independently certified SLSA level.
-
-Download the `.nupkg`, `.snupkg`, `.intoto.jsonl`, and
-`release-manifest.json` from the same
-[GitHub Release](https://github.com/HRAshton/WinCfApiWrapper/releases).
-Read the `commit` field from the manifest, then verify each original package:
+## Installation
 
 ```powershell
-gh attestation verify WinCfApiWrapper.<version>.nupkg `
-  --bundle WinCfApiWrapper.<version>.intoto.jsonl `
-  --repo HRAshton/WinCfApiWrapper `
-  --signer-workflow HRAshton/WinCfApiWrapper/.github/workflows/attested-release-build.yml `
-  --source-ref refs/heads/master `
-  --source-digest <manifest-commit>
+dotnet add package WinCfApiWrapper
 ```
 
-Repeat for the `.snupkg`. The release workflow also compares the nuget.org
-repository-signed package payload against the original attested package before
-finalizing the release. Existing `v0.1.0` has attestations in GitHub's
-attestation store, but predates the downloadable `.intoto.jsonl` asset.
+The example below uses the Microsoft dependency injection container. If your application does not already reference it, also install `Microsoft.Extensions.DependencyInjection`.
+
+## Quick start
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using WinCfApiWrapper;
+using WinCfApiWrapper.Public;
+using WinCfApiWrapper.Public.Containers;
+
+var services = new ServiceCollection();
+services.AddWinCfApiWrapper();
+using var provider = services.BuildServiceProvider();
+
+var factory = provider.GetRequiredService<ICloudMountFactory>();
+await using ICloudMount mount = factory.Open(new CloudMountOptions
+{
+    Container = new ZipContainer(_ => File.OpenRead(@"C:\archives\sample.zip")),
+    Root = @"C:\Cloud\Sample",
+});
+
+mount.Error += (_, error) => Console.Error.WriteLine(error.Exception);
+await mount.MountAsync();
+Console.WriteLine($"Mounted at {mount.Root}");
+await mount.HydrateAsync(@"docs\hello.txt");
+```
+
+`MountAsync` creates or validates placeholders and connects the sync root; it does not download all files. Windows fetches contents when needed. Use `HydrateAsync(path)` for one file or `HydrateAllAsync(progress)` for all files. Bulk hydration reports progress and throws an `AggregateException` if any files fail. Background fetch failures are reported through `Error` and the configured logger.
+
+Use a dedicated, disposable mount folder containing no user data. `CloudMountOptions.Root` is a base path; the actual `mount.Root` includes a content fingerprint. Disposing the mount disconnects it. To unregister and delete the folder, call `ISyncRootManager.Unregister(mount.Root)` after disposal. See the [lifecycle and cleanup guide](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/architecture.md#identity-re-use-and-cleanup) before integrating cleanup into an application.
+
+## Public API
+
+| Type | Purpose |
+| --- | --- |
+| `ICloudMountFactory` / `ICloudMount` | Open, mount, inspect, hydrate, and dispose a sync root. |
+| `CloudMountOptions` | Set the container, base path, and fetch/hydration concurrency limits. |
+| `IContentContainer` / `ContainerEntry` | Provide a stable file and directory listing and streams for file contents. |
+| `ISyncRootManager` | Unregister mounts or clean abandoned mounts under an app-owned folder. |
+| `MountState`, `MountStatistics`, `MountErrorEventArgs`, `HydrationProgress` | Observe mount state, background failures, fetch activity, and bulk hydration progress. |
+
+Public interfaces and built-in containers are in `WinCfApiWrapper.Public` and `WinCfApiWrapper.Public.Containers`. `AddWinCfApiWrapper()` is in `WinCfApiWrapper`. When the host registers `Microsoft.Extensions.Logging`, lifecycle and failure events are logged; otherwise the library uses a no-op logger.
+
+## Guides and contributing
+
+- [Documentation index](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/README.md)
+- [Containers](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/containers.md) — built-in formats, stream ownership, and custom container contracts.
+- [Architecture and lifecycle](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/architecture.md) — hydration, errors, resume, and safe cleanup.
+- [Development](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/development.md) — building, testing, fuzzing, and coverage.
+- [Security model](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/security-model.md) — trust boundaries and limitations.
+- [Releasing and provenance](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/releasing.md) — release cadence, package verification, and recovery.
+- [Contributing](https://github.com/HRAshton/WinCfApiWrapper/blob/master/CONTRIBUTING.md) — submitting issues, tests, and pull requests.
+- [Security policy](https://github.com/HRAshton/WinCfApiWrapper/blob/master/SECURITY.md) — private vulnerability reporting.
+
+Report ordinary bugs and request features through [GitHub issues](https://github.com/HRAshton/WinCfApiWrapper/issues). Report vulnerabilities privately using the security policy.

@@ -1,0 +1,48 @@
+name: Bug report
+description: Report incorrect behavior or a regression (not a security vulnerability).
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "For potential vulnerabilities, do not post public details. Follow SECURITY.md and use private vulnerability reporting."
+  - type: input
+    id: version
+    attributes:
+      label: WinCfApiWrapper version
+      placeholder: "e.g. 0.1.8"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Windows build and .NET version
+      placeholder: "e.g. Windows 11 24H2 x64, .NET 8"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Minimal example, archive/container format, and exact steps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include sanitized logs or error messages; never include tokens or sensitive file data.
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Additional context
+      description: Does the problem reproduce with offline data? Include relevant filesystem and mount conditions.
+    validations:
+      required: false
