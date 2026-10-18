@@ -62,7 +62,9 @@ jobs:
       - name: Restore unit tests and library
         run: dotnet restore tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj
 
-      - name: Unit tests
+      - name: Unit and archive stress tests
+        env:
+          RZM_RUN_ARCHIVE_STRESS: '1'
         run: dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
 
       - name: Restore integration tests

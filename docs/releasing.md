@@ -12,7 +12,7 @@ Maintainers use the release workflow for publication and recovery.
 ## Build and publish stages
 
 1. **Resolve:** Determine intended commit, version, tag, and whether there is new content to publish.
-2. **Build:** `.github/workflows/attested-release-build.yml` checks out the exact commit, executes unit, offline integration, and live tests, packs NuGet binaries/symbols, and issues GitHub artifact attestations.
+2. **Build:** `.github/workflows/attested-release-build.yml` checks out the exact commit, executes unit, archive stress, offline integration, and live tests, packs NuGet binaries/symbols, and issues GitHub artifact attestations. Archive stress tests are enabled on both runtimes and must pass before packaging.
 3. **Stage/verify:** `scripts/release-transaction.ps1` stages draft release assets, hashes and provenance, and verifies the bundle against the commit and package bytes.
 4. **Publish:** The `nuget` GitHub environment obtains a short-lived credential via NuGet Trusted Publishing and publishes the original package.
 5. **Reconcile:** The workflow verifies the repository-signed NuGet package content against the attested original, then finalizes the GitHub Release.
