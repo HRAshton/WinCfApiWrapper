@@ -45,7 +45,7 @@ CFAPI callback -> FetchCoordinator -> IContentContainer.OpenReadAsync
 
 ## Identity, re-use, and cleanup
 
-The mount path appends a content-list fingerprint to the requested base path. A previously registered mount can be resumed only if its expected directories/placeholders remain valid. The fingerprint is derived from declared metadata, not from a cryptographic verification of every file's current contents; unchanged upstream content during the mount's lifetime is a caller responsibility.
+The mount path appends `.rzm-` followed by the first eight lowercase hexadecimal characters of the content-list SHA-256 fingerprint to the requested base path. This 32-bit prefix can collide between different listings. A previously registered mount can be resumed only if its expected directories/placeholders remain valid. The fingerprint is derived from declared metadata, not from a cryptographic verification of every file's current contents; unchanged upstream content during the mount's lifetime is a caller responsibility.
 
 Root cleanup is intentionally destructive. Only provide dedicated application-owned folders to `CleanupMounts`; never a directory shared with user data. Read [security-model.md](security-model.md) before mounting third-party data or integrating remote sources.
 

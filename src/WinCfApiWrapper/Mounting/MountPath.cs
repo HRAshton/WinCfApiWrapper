@@ -6,7 +6,9 @@ internal static class MountPath
 
     internal static string For(string basePath, string fingerprint)
     {
-        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(basePath)) + Marker + fingerprint;
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(basePath))
+            + Marker
+            + fingerprint[..8].ToLowerInvariant();
     }
 
     internal static bool IsMount(string path)
@@ -15,7 +17,7 @@ internal static class MountPath
         int marker = name.LastIndexOf(Marker, StringComparison.OrdinalIgnoreCase);
 
         return marker > 0
-            && name.Length - marker - Marker.Length == 64
+            && name.Length - marker - Marker.Length == 8
             && name.AsSpan(marker + Marker.Length).IndexOfAnyExcept("0123456789ABCDEFabcdef") < 0;
     }
 }
