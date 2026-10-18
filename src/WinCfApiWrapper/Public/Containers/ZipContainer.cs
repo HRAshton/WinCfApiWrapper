@@ -11,15 +11,25 @@ namespace WinCfApiWrapper.Public.Containers;
 /// The factory may be called concurrently and must return a new stream on every call. For remote archives, it can
 /// return a seekable range stream.
 /// </remarks>
-public sealed class ZipContainer(Func<CancellationToken, Stream> openArchive) : IContentContainer
+/// <param name="limits">Optional archive entry limit; ZIP file contents remain streamed.</param>
+public sealed class ZipContainer(
+    Func<CancellationToken, Stream> openArchive,
+    ArchiveResourceLimits? limits = null
+) : IContentContainer
 {
     private readonly SemaphoreSlim _indexLock = new(1, 1);
+    private readonly ArchiveResourceLimits _limits = ArchiveResourceLimits.Resolve(limits);
 
     private readonly ArchiveStreamSource _source = new(
         openArchive ?? throw new ArgumentNullException(nameof(openArchive))
     );
 
     private ZipCatalog? _catalog;
+
+    /// <summary>Initializes a new instance of the <see cref="ZipContainer" /> class.</summary>
+    /// <param name="openArchive">A factory for independent readable, seekable streams.</param>
+    public ZipContainer(Func<CancellationToken, Stream> openArchive)
+        : this(openArchive, null) { }
 
     /// <inheritdoc />
     public async ValueTask<IReadOnlyCollection<ContainerEntry>> GetEntriesAsync(
@@ -30,7 +40,7 @@ public sealed class ZipContainer(Func<CancellationToken, Stream> openArchive) : 
         try
         {
             _catalog ??= await Task.Run(
-                    () => new ZipCatalog(_source.OpenRead(cancellationToken)),
+                    () => new ZipCatalog(_source.OpenRead(cancellationToken), _limits.MaxEntries),
                     cancellationToken
                 )
                 .ConfigureAwait(false);

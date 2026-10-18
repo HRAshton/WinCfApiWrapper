@@ -13,12 +13,17 @@ internal sealed class ZipCatalog
         StringComparer.OrdinalIgnoreCase
     );
 
-    public ZipCatalog(Stream stream)
+    public ZipCatalog(Stream stream, int maxEntries)
     {
         using Stream ownedStream = stream ?? throw new ArgumentNullException(nameof(stream));
+        if (maxEntries <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxEntries));
         using var archive = new ZipArchive(ownedStream, ZipArchiveMode.Read, true);
+        int count = 0;
         foreach (ZipArchiveEntry entry in archive.Entries)
         {
+            if (++count > maxEntries)
+                throw new InvalidDataException("ZIP archive exceeds maximum entry count.");
             bool isDirectory = entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\');
             string name = ContainerPath.Normalize(entry.FullName);
             if (name.Length == 0)

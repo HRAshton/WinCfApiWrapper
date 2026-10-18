@@ -32,7 +32,7 @@ public sealed class CloudMountTransactionTests : IDisposable
             }
         }
 
-        var catalog = new ZipCatalog(File.OpenRead(Source));
+        var catalog = new ZipCatalog(File.OpenRead(Source), maxEntries: 2);
         _fingerprint = catalog.Fingerprint;
     }
 

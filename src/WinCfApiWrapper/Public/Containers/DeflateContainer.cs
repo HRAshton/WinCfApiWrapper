@@ -6,11 +6,19 @@ namespace WinCfApiWrapper.Public.Containers;
 /// <summary>Exposes a raw Deflate stream as one file.</summary>
 /// <param name="openStream">A factory for the compressed stream.</param>
 /// <param name="entryName">The file name exposed in the container.</param>
+/// <param name="limits">Optional decoding limits.</param>
 public sealed class DeflateContainer(
     Func<CancellationToken, Stream> openStream,
-    string entryName = "content"
-) : CompressedContainer(openStream, entryName)
+    string entryName = "content",
+    ArchiveResourceLimits? limits = null
+) : CompressedContainer(openStream, entryName, limits)
 {
+    /// <summary>Initializes a new instance of the <see cref="DeflateContainer" /> class.</summary>
+    /// <param name="openStream">A factory that returns compressed data.</param>
+    /// <param name="entryName">The file name exposed inside the mount.</param>
+    public DeflateContainer(Func<CancellationToken, Stream> openStream, string entryName)
+        : this(openStream, entryName, null) { }
+
     /// <inheritdoc />
     protected override Stream CreateDecoder(Stream source)
     {

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using WinCfApiWrapper.Public;
+using WinCfApiWrapper.Public.Containers;
 
 namespace WinCfApiWrapper.Containers.Base;
 
@@ -9,6 +10,20 @@ public abstract class BufferedContainer : IContentContainer
     private readonly SemaphoreSlim _indexLock = new(1, 1);
     private ContainerCatalog? _catalog;
     private Dictionary<string, byte[]>? _contents;
+
+    /// <summary>Initializes a new instance of the <see cref="BufferedContainer" /> class.</summary>
+    protected BufferedContainer()
+        : this(null) { }
+
+    /// <summary>Initializes a new instance of the <see cref="BufferedContainer" /> class.</summary>
+    /// <param name="limits">Optional limits on decoded bytes and entries.</param>
+    protected BufferedContainer(ArchiveResourceLimits? limits)
+    {
+        Limits = ArchiveResourceLimits.Resolve(limits);
+    }
+
+    /// <summary>Gets the decoding limits for this container.</summary>
+    protected ArchiveResourceLimits Limits { get; }
 
     /// <inheritdoc />
     public async ValueTask<IReadOnlyCollection<ContainerEntry>> GetEntriesAsync(
@@ -76,8 +91,15 @@ public abstract class BufferedContainer : IContentContainer
 
             Dictionary<string, byte[]> contents = new(StringComparer.OrdinalIgnoreCase);
             List<ContainerEntry> entries = [];
+            long totalBytes = 0;
             foreach (BufferedEntry item in decoded)
             {
+                if (entries.Count >= Limits.MaxEntries)
+                    throw new InvalidDataException("Container exceeds maximum entry count.");
+                if (item.Content.LongLength > Limits.MaxBufferedBytes - totalBytes)
+                    throw new InvalidDataException("Container exceeds maximum buffered byte count.");
+                totalBytes += item.Content.LongLength;
+
                 string path = ContainerPath.Normalize(item.Path);
                 string version = item.IsDirectory
                     ? string.Empty
