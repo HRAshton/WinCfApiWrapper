@@ -182,10 +182,11 @@ public sealed class CancelFetchTests : IDisposable
         }
         finally
         {
+            // Finish cleanup even when the test runner cancels the test.
             await coordinator
                 .DisposeAsync()
                 .AsTask()
-                .WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
+                .WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         }
 
         Assert.Equal(2, opened);
@@ -266,10 +267,11 @@ public sealed class CancelFetchTests : IDisposable
         }
         finally
         {
+            // Finish cleanup even when the test runner cancels the test.
             await coordinator
                 .DisposeAsync()
                 .AsTask()
-                .WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
+                .WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         }
 
         Assert.True(stream.Canceled);
@@ -390,10 +392,11 @@ public sealed class CancelFetchTests : IDisposable
         }
         finally
         {
+            // Finish cleanup even when the test runner cancels the test.
             await coordinator
                 .DisposeAsync()
                 .AsTask()
-                .WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
+                .WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         }
 
         Assert.Equal(2, opened);
