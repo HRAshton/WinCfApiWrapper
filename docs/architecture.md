@@ -49,6 +49,8 @@ The mount path appends a content-list fingerprint to the requested base path. A 
 
 Root cleanup is intentionally destructive. Only provide dedicated application-owned folders to `CleanupMounts`; never a directory shared with user data. Read [security-model.md](security-model.md) before mounting third-party data or integrating remote sources.
 
+Call `ISyncRootManager.Unregister(mount.Root)` after disposing the mount to unregister and delete its folder. At application startup, `ISyncRootManager.CleanupMounts(parentFolder)` removes recognized mount folders directly under a dedicated application-owned parent and returns the count removed. Never pass a volume root or a folder containing user data; partial cleanup failures are reported as an `AggregateException`.
+
 ## Code map
 
 - `src/WinCfApiWrapper/Public/` — published contracts

@@ -13,7 +13,7 @@ Thanks for helping improve WinCfApiWrapper. Bug reports, documentation updates, 
 
 Use Windows x64 with Cloud Files API support (Windows 10 1709+), the .NET 10 SDK, and the .NET 8 and 10 runtimes. The main library targets `net8.0-windows`. Offline native integration tests need permission to register Windows sync roots.
 
-Start with [the development guide](docs/development.md) for exact build/test commands and environment details. For application code, read the [library README](src/WinCfApiWrapper/README.md) and [container contract](docs/containers.md).
+Start with [the development guide](docs/development.md) for exact build/test commands and environment details. For application code, read the [project README](README.md) and [container contract](docs/containers.md).
 
 ## Contribution workflow
 

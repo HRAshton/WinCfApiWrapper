@@ -75,4 +75,4 @@ Use validated, unique paths when constructing the example. For remote storage, c
 
 Exercise case-colliding names, `..` segments, Windows reserved devices, file/directory conflicts, empty or unstable versions, wrong lengths, concurrent reads, cancellation, truncated streams, and changed remote content. Tests should verify that cleanup never targets directories containing user data.
 
-For mounting examples, see [the package README](../src/WinCfApiWrapper/README.md).
+For mounting examples, see [the project README](../README.md#quick-start).

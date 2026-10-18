@@ -10,4 +10,4 @@ WinCfApiWrapper is a Windows-only .NET library exposing read-only, container-bac
 | [Development](development.md) | Contributors | Windows prerequisites, build, tests, and coverage |
 | [Releasing](releasing.md) | Maintainers | Release pipeline, attestation, verification, and recovery |
 
-For a basic usage example and the public API, see the [NuGet package README](../src/WinCfApiWrapper/README.md). For contribution rules, see [CONTRIBUTING.md](../CONTRIBUTING.md). Vulnerabilities belong in the private channel described by [SECURITY.md](../SECURITY.md).
+For installation, a basic usage example, and the public API, see the [project README](../README.md), which is also included in the NuGet package. For contribution rules, see [CONTRIBUTING.md](../CONTRIBUTING.md). Vulnerabilities belong in the private channel described by [SECURITY.md](../SECURITY.md).

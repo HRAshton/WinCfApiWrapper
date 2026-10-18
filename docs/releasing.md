@@ -32,7 +32,9 @@ gh attestation verify WinCfApiWrapper.<version>.nupkg `
   --source-digest <manifest-commit>
 ```
 
-Repeat for `.snupkg`. Inspect the manifest and release tag, and check that the verified source digest matches the expected commit. See the [root README](../README.md) for the current verification procedure.
+Repeat for `.snupkg`. Inspect the manifest and release tag, and check that the verified source digest matches the expected commit. The published NuGet README comes from the repository-root `README.md` at that same source commit; packaging does not fetch documentation from the network. The guide links in that README point to GitHub so they also work on nuget.org.
+
+Existing `v0.1.0` has attestations in GitHub's attestation store, but predates the downloadable `.intoto.jsonl` asset. For that release, omit `--bundle` to verify against GitHub's attestation store.
 
 ## Failed or partial publication
 
