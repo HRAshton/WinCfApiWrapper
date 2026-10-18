@@ -139,8 +139,11 @@ public sealed class CancelFetchTests : IDisposable
         int calls = 0;
         var transfer = new NativeTransfer((_, _) => Interlocked.Increment(ref calls));
         await Task.WhenAll(
-            Task.Run(() => request.Cancel(0, 8192)),
-            Task.Run(() => transfer.Complete(request, new byte[8192], 8192, 0))
+            Task.Run(() => request.Cancel(0, 8192), TestContext.Current.CancellationToken),
+            Task.Run(
+                () => transfer.Complete(request, new byte[8192], 8192, 0),
+                TestContext.Current.CancellationToken
+            )
         );
         Assert.InRange(calls, 0, 1);
         Assert.False(transfer.Fail(request));
@@ -149,6 +152,8 @@ public sealed class CancelFetchTests : IDisposable
     [Fact]
     public async Task CancelFetch_RepeatedKey_CancelsAllRunningRequests()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
         GatedReadStream[] streams = [new(new byte[8192]), new(new byte[8192])];
         int opened = 0;
@@ -171,13 +176,17 @@ public sealed class CancelFetchTests : IDisposable
             Invoke(coordinator, 1, false);
             Invoke(coordinator, 1, false);
             await Task.WhenAll(streams.Select(stream => stream.Started.Task))
-                .WaitAsync(TimeSpan.FromSeconds(5));
+                .WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
             Assert.Equal(2, coordinator.PendingRequestCount);
             Invoke(coordinator, 1, true);
         }
         finally
         {
-            await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            // Finish cleanup even when the test runner cancels the test.
+            await coordinator
+                .DisposeAsync()
+                .AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         }
 
         Assert.Equal(2, opened);
@@ -191,6 +200,8 @@ public sealed class CancelFetchTests : IDisposable
     [Fact]
     public async Task CancelFetch_QueuedRequest_SkipsTransportAndReleasesState()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
         var stream = new GatedReadStream(new byte[8192]);
         int opened = 0;
@@ -220,11 +231,11 @@ public sealed class CancelFetchTests : IDisposable
         await using (coordinator)
         {
             Invoke(coordinator, 1, false);
-            await stream.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await stream.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
             Invoke(coordinator, 2, false);
             Invoke(coordinator, 2, true);
             stream.Released.TrySetResult();
-            await transferred.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await transferred.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
         }
 
         Assert.Equal(1, opened);
@@ -235,6 +246,8 @@ public sealed class CancelFetchTests : IDisposable
     [Fact]
     public async Task CancelFetch_RunningRequest_PropagatesCancellationToRead()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
         var stream = new GatedReadStream(new byte[8192]);
         var coordinator = new FetchCoordinator(
@@ -249,12 +262,16 @@ public sealed class CancelFetchTests : IDisposable
         try
         {
             Invoke(coordinator, 1, false);
-            await stream.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await stream.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
             Invoke(coordinator, 1, true);
         }
         finally
         {
-            await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            // Finish cleanup even when the test runner cancels the test.
+            await coordinator
+                .DisposeAsync()
+                .AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         }
 
         Assert.True(stream.Canceled);
@@ -264,6 +281,8 @@ public sealed class CancelFetchTests : IDisposable
     [Fact]
     public async Task CancelFetch_ActivePartialRange_TransfersRemainingBytes()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
         var stream = new GatedReadStream(new byte[8192]);
         var transferred = new TaskCompletionSource<TransferCall>(
@@ -281,10 +300,13 @@ public sealed class CancelFetchTests : IDisposable
         await using (coordinator)
         {
             Invoke(coordinator, 1, false);
-            await stream.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await stream.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
             InvokeCancel(coordinator, 1, 0, 4096);
             stream.Released.TrySetResult();
-            TransferCall result = await transferred.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            TransferCall result = await transferred.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                testCancellationToken
+            );
             Assert.Equal(4096, result.Offset);
             Assert.Equal(4096, result.Length);
             Assert.Equal(0, result.CompletionStatus);
@@ -324,7 +346,10 @@ public sealed class CancelFetchTests : IDisposable
             Invoke(coordinator, 1, false);
             Invoke(coordinator, 2, false);
             Invoke(coordinator, 1, true);
-            await transferred.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await transferred.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken
+            );
         }
 
         Assert.True(successes >= 1);
@@ -333,6 +358,8 @@ public sealed class CancelFetchTests : IDisposable
     [Fact]
     public async Task ConcurrentHydration_QueueSaturation_RespectsConfiguredLimits()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
         GatedReadStream[] streams = [new(new byte[8192]), new(new byte[8192])];
         int opened = 0;
@@ -350,7 +377,7 @@ public sealed class CancelFetchTests : IDisposable
             Invoke(coordinator, 1, false);
             Invoke(coordinator, 2, false);
             await Task.WhenAll(streams.Select(stream => stream.Started.Task))
-                .WaitAsync(TimeSpan.FromSeconds(5));
+                .WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
             for (int key = 3; key <= 64; key++)
                 Invoke(coordinator, key, false);
 
@@ -365,7 +392,11 @@ public sealed class CancelFetchTests : IDisposable
         }
         finally
         {
-            await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            // Finish cleanup even when the test runner cancels the test.
+            await coordinator
+                .DisposeAsync()
+                .AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         }
 
         Assert.Equal(2, opened);

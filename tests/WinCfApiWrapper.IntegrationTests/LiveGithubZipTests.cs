@@ -30,6 +30,8 @@ public sealed class LiveGithubZipTests
     [Fact]
     public async Task GithubArchive_ReadsMountedEntriesFromRemoteFactory()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         if (Environment.GetEnvironmentVariable("RZM_RUN_LIVE_TESTS") != "1")
         {
             throw new InvalidOperationException(
@@ -63,14 +65,19 @@ public sealed class LiveGithubZipTests
         bool mounted = false;
         try
         {
-            await mount.MountAsync();
+            await mount.MountAsync(testCancellationToken);
             mounted = true;
             Assert.Equal(MountState.Mounted, mount.State);
             Assert.Equal(1, Volatile.Read(ref archiveOpens));
             Assert.Equal(
                 SampleHash,
                 Convert.ToHexString(
-                    SHA256.HashData(await File.ReadAllBytesAsync(mount.Resolve("sample.txt")))
+                    SHA256.HashData(
+                        await File.ReadAllBytesAsync(
+                            mount.Resolve("sample.txt"),
+                            testCancellationToken
+                        )
+                    )
                 )
             );
             Assert.True(
@@ -78,12 +85,17 @@ public sealed class LiveGithubZipTests
                 "Reading a placeholder did not fetch the archive from GitHub again."
             );
 
-            await mount.HydrateAllAsync();
+            await mount.HydrateAllAsync(cancellationToken: testCancellationToken);
             Assert.Equal(0, mount.Statistics.FailedFetches);
             Assert.Equal(
                 CsvHash,
                 Convert.ToHexString(
-                    SHA256.HashData(await File.ReadAllBytesAsync(mount.Resolve("sample_data.csv")))
+                    SHA256.HashData(
+                        await File.ReadAllBytesAsync(
+                            mount.Resolve("sample_data.csv"),
+                            testCancellationToken
+                        )
+                    )
                 )
             );
         }

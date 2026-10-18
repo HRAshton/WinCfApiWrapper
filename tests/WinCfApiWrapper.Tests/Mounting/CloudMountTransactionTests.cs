@@ -50,7 +50,9 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task Mount_InMemoryArchiveFactory_IndexesWithoutAFilePath()
     {
-        byte[] bytes = await File.ReadAllBytesAsync(Source);
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
+        byte[] bytes = await File.ReadAllBytesAsync(Source, testCancellationToken);
         int opens = 0;
         var options = new CloudMountOptions
         {
@@ -64,7 +66,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         };
         await using var mount = new CloudMount(options, new FakeMountOperations());
 
-        await mount.MountAsync();
+        await mount.MountAsync(testCancellationToken);
 
         Assert.True(mount.Contains("docs/one.txt"));
         Assert.Equal(1, opens);
@@ -89,7 +91,9 @@ public sealed class CloudMountTransactionTests : IDisposable
             logger
         );
 
-        IOException error = await Assert.ThrowsAsync<IOException>(() => mount.MountAsync());
+        IOException error = await Assert.ThrowsAsync<IOException>(() =>
+            mount.MountAsync(TestContext.Current.CancellationToken)
+        );
 
         Assert.Contains(
             logger.Entries,
@@ -139,37 +143,41 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task Mount_Failure_AllowsFreshMountAtSamePath()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var fake = new FakeMountOperations(name =>
         {
             if (name == "connect")
                 throw new IOException("connect");
         });
         await using (CloudMount failed = Open(fake))
-            await Assert.ThrowsAsync<IOException>(() => failed.MountAsync());
+            await Assert.ThrowsAsync<IOException>(() => failed.MountAsync(testCancellationToken));
 
         fake.Fault = null;
         await using CloudMount fresh = Open(fake);
-        await fresh.MountAsync();
+        await fresh.MountAsync(testCancellationToken);
         Assert.Equal(MountState.Mounted, fresh.State);
     }
 
     [Fact]
     public async Task Resume_ValidationFailure_PreservesExistingPlaceholdersAndFolder()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var fake = new FakeMountOperations();
         await using (CloudMount first = Open(fake))
-            await first.MountAsync();
+            await first.MountAsync(testCancellationToken);
 
         string path = Path.Combine(Root, "docs", "one.txt");
-        string content = await File.ReadAllTextAsync(path);
+        string content = await File.ReadAllTextAsync(path, testCancellationToken);
         fake.Fault = name =>
         {
             if (name == "validate")
                 throw new IOException("identity mismatch");
         };
         await using CloudMount resumed = Open(fake);
-        await Assert.ThrowsAsync<IOException>(() => resumed.MountAsync());
-        Assert.Equal(content, await File.ReadAllTextAsync(path));
+        await Assert.ThrowsAsync<IOException>(() => resumed.MountAsync(testCancellationToken));
+        Assert.Equal(content, await File.ReadAllTextAsync(path, testCancellationToken));
         Assert.True(Directory.Exists(Root));
         Assert.True(fake.Registered);
         Assert.DoesNotContain("unregister", fake.Calls);
@@ -178,13 +186,15 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task Resume_ValidRoot_ConnectsWithoutUpdatingRegistration()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var fake = new FakeMountOperations();
         await using (CloudMount first = Open(fake))
-            await first.MountAsync();
+            await first.MountAsync(testCancellationToken);
 
         fake.Calls.Clear();
         await using CloudMount resumed = Open(fake);
-        await resumed.MountAsync();
+        await resumed.MountAsync(testCancellationToken);
         Assert.Equal(MountState.Mounted, resumed.State);
         Assert.DoesNotContain("register", fake.Calls);
     }
@@ -192,6 +202,8 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task Dispose_ConcurrentHydration_DoesNotReleaseResourcesEarly()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var fake = new FakeMountOperations(
             hydrateStarted: new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously
@@ -201,9 +213,9 @@ public sealed class CloudMountTransactionTests : IDisposable
             )
         );
         CloudMount mount = Open(fake);
-        await mount.MountAsync();
-        Task hydration = mount.HydrateAsync("docs/one.txt");
-        await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await mount.MountAsync(testCancellationToken);
+        Task hydration = mount.HydrateAsync("docs/one.txt", testCancellationToken);
+        await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
         Task disposal = mount.DisposeAsync().AsTask();
         Assert.False(disposal.IsCompleted);
         Assert.DoesNotContain("disconnect", fake.Calls);
@@ -216,6 +228,8 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task Dispose_CancellableHydration_CancelsReadBeforeDisconnect()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var fake = new FakeMountOperations(
             honorHydrationCancellation: true,
             hydrateStarted: new TaskCompletionSource(
@@ -226,10 +240,13 @@ public sealed class CloudMountTransactionTests : IDisposable
             )
         );
         CloudMount mount = Open(fake);
-        await mount.MountAsync();
-        Task hydration = mount.HydrateAsync("docs/one.txt");
-        await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await mount.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await mount.MountAsync(testCancellationToken);
+        Task hydration = mount.HydrateAsync("docs/one.txt", testCancellationToken);
+        await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
+        await mount
+            .DisposeAsync()
+            .AsTask()
+            .WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => hydration);
         Assert.Equal(0, fake.ActiveHydrates);
         Assert.Contains("disconnect", fake.Calls);
@@ -238,6 +255,8 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task Dispose_DuringBulkHydration_CancelsBulkOperation()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var fake = new FakeMountOperations(
             honorHydrationCancellation: true,
             hydrateStarted: new TaskCompletionSource(
@@ -256,11 +275,14 @@ public sealed class CloudMountTransactionTests : IDisposable
             },
             fake
         );
-        await mount.MountAsync();
-        Task hydration = mount.HydrateAllAsync();
-        await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await mount.MountAsync(testCancellationToken);
+        Task hydration = mount.HydrateAllAsync(cancellationToken: testCancellationToken);
+        await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
 
-        await mount.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await mount
+            .DisposeAsync()
+            .AsTask()
+            .WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => hydration);
         Assert.Equal(1, fake.Calls.Count(call => call == "hydrate"));
@@ -269,6 +291,8 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task Dispose_WhenNativeHydrationFails_ReportsBulkCancellation()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var fake = new FakeMountOperations(
             hydrateStarted: new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously
@@ -287,21 +311,23 @@ public sealed class CloudMountTransactionTests : IDisposable
             },
             fake
         );
-        await mount.MountAsync();
-        Task hydration = mount.HydrateAllAsync();
-        await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await mount.MountAsync(testCancellationToken);
+        Task hydration = mount.HydrateAllAsync(cancellationToken: testCancellationToken);
+        await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
         Task disposal = mount.DisposeAsync().AsTask();
         Assert.Equal(MountState.Stopping, mount.State);
 
         fake.ReleaseHydrate!.SetResult();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => hydration);
-        await disposal.WaitAsync(TimeSpan.FromSeconds(5));
+        await disposal.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
         Assert.Equal(MountState.Stopped, mount.State);
     }
 
     [Fact]
     public async Task HydrateAll_FileFailures_ReportProgressAndPreserveEveryError()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var fake = new FakeMountOperations(name =>
         {
             if (name == "hydrate")
@@ -316,11 +342,11 @@ public sealed class CloudMountTransactionTests : IDisposable
             },
             fake
         );
-        await mount.MountAsync();
+        await mount.MountAsync(testCancellationToken);
         var progress = new RecordingProgress();
 
         AggregateException error = await Assert.ThrowsAsync<AggregateException>(() =>
-            mount.HydrateAllAsync(progress)
+            mount.HydrateAllAsync(progress, cancellationToken: testCancellationToken)
         );
 
         Assert.Equal(2, error.InnerExceptions.Count);
@@ -338,23 +364,31 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task Mount_PublicOperations_RequireActiveMountAndKnownFile()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         await using CloudMount mount = Open(new FakeMountOperations());
         Assert.Throws<InvalidOperationException>(() => mount.Contains("docs/one.txt"));
         Assert.Throws<InvalidOperationException>(() => mount.Root);
-        await mount.MountAsync();
+        await mount.MountAsync(testCancellationToken);
 
         Assert.True(mount.Contains("docs/one.txt"));
         Assert.False(mount.Contains("missing.txt"));
         Assert.Equal(Path.Combine(mount.Root, "docs", "one.txt"), mount.Resolve("docs/one.txt"));
-        await Assert.ThrowsAsync<FileNotFoundException>(() => mount.HydrateAsync("missing.txt"));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => mount.MountAsync());
+        await Assert.ThrowsAsync<FileNotFoundException>(() =>
+            mount.HydrateAsync("missing.txt", testCancellationToken)
+        );
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            mount.MountAsync(testCancellationToken)
+        );
 
         // Dispose early to verify the public operations reject a stopped mount; await using remains
         // as cleanup if an earlier assertion fails.
         // ReSharper disable once DisposeOnUsingVariable
         await mount.DisposeAsync();
         Assert.Throws<InvalidOperationException>(() => mount.Contains("docs/one.txt"));
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => mount.MountAsync());
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            mount.MountAsync(testCancellationToken)
+        );
     }
 
     [Fact]
@@ -371,7 +405,7 @@ public sealed class CloudMountTransactionTests : IDisposable
             fake,
             logger
         );
-        await mount.MountAsync();
+        await mount.MountAsync(TestContext.Current.CancellationToken);
         var reported = new List<MountErrorEventArgs>();
         mount.Error += (_, _) => throw new IOException("bad subscriber");
         mount.Error += (_, args) => reported.Add(args);
@@ -408,7 +442,7 @@ public sealed class CloudMountTransactionTests : IDisposable
             fake,
             logger
         );
-        await mount.MountAsync();
+        await mount.MountAsync(TestContext.Current.CancellationToken);
 
         unsafe
         {
@@ -438,19 +472,23 @@ public sealed class CloudMountTransactionTests : IDisposable
             new FakeMountOperations()
         );
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => mount.MountAsync());
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            mount.MountAsync(TestContext.Current.CancellationToken)
+        );
         Assert.False(Directory.Exists(mount.Root));
     }
 
     [Fact]
     public async Task HydrateAll_Success_ReportsCompletedFiles()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var fake = new FakeMountOperations();
         await using CloudMount mount = Open(fake);
-        await mount.MountAsync();
+        await mount.MountAsync(testCancellationToken);
         var progress = new RecordingProgress();
 
-        await mount.HydrateAllAsync(progress);
+        await mount.HydrateAllAsync(progress, cancellationToken: testCancellationToken);
 
         Assert.Equal(2, fake.Calls.Count(call => call == "hydrate"));
         Assert.Contains(
@@ -463,26 +501,32 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task Resume_UnregisteredFolder_PreservesExistingFiles()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         Directory.CreateDirectory(Root);
         string retained = Path.Combine(Root, "user-file.txt");
-        await File.WriteAllTextAsync(retained, "keep");
+        await File.WriteAllTextAsync(retained, "keep", testCancellationToken);
         await using CloudMount mount = Open(new FakeMountOperations());
 
-        IOException error = await Assert.ThrowsAsync<IOException>(() => mount.MountAsync());
+        IOException error = await Assert.ThrowsAsync<IOException>(() =>
+            mount.MountAsync(testCancellationToken)
+        );
 
         Assert.Contains("not registered", error.Message);
-        Assert.Equal("keep", await File.ReadAllTextAsync(retained));
+        Assert.Equal("keep", await File.ReadAllTextAsync(retained, testCancellationToken));
     }
 
     [Fact]
     public async Task Mount_RootIsFile_DoesNotReplaceIt()
     {
-        await File.WriteAllTextAsync(Root, "keep");
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
+        await File.WriteAllTextAsync(Root, "keep", testCancellationToken);
         await using CloudMount mount = Open(new FakeMountOperations());
 
-        await Assert.ThrowsAsync<IOException>(() => mount.MountAsync());
+        await Assert.ThrowsAsync<IOException>(() => mount.MountAsync(testCancellationToken));
 
-        Assert.Equal("keep", await File.ReadAllTextAsync(Root));
+        Assert.Equal("keep", await File.ReadAllTextAsync(Root, testCancellationToken));
     }
 
     [Fact]
@@ -495,7 +539,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         });
         CloudMount mount = Open(fake);
         AggregateException error = await Assert.ThrowsAsync<AggregateException>(() =>
-            mount.MountAsync()
+            mount.MountAsync(TestContext.Current.CancellationToken)
         );
         Assert.Equal(2, error.InnerExceptions.Count);
         Assert.Contains("placeholder-created", error.InnerExceptions[0].Message);
@@ -537,6 +581,8 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task ConcurrentExplicitHydration_64Requests_RespectsNativeConcurrencyLimit()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var fake = new FakeMountOperations(
             hydrateStarted: new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously
@@ -546,12 +592,12 @@ public sealed class CloudMountTransactionTests : IDisposable
             )
         );
         await using CloudMount mount = Open(fake);
-        await mount.MountAsync();
+        await mount.MountAsync(testCancellationToken);
         Task[] hydrations = Enumerable
             .Range(0, 64)
-            .Select(_ => mount.HydrateAsync("docs/one.txt"))
+            .Select(_ => mount.HydrateAsync("docs/one.txt", testCancellationToken))
             .ToArray();
-        await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
         try
         {
             Assert.InRange(fake.ActiveHydrates, 1, 4);
@@ -561,7 +607,7 @@ public sealed class CloudMountTransactionTests : IDisposable
             fake.ReleaseHydrate!.SetResult();
         }
 
-        await Task.WhenAll(hydrations).WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.WhenAll(hydrations).WaitAsync(TimeSpan.FromSeconds(10), testCancellationToken);
         Assert.Equal(1, fake.MaxActiveHydrates);
         Assert.Equal(0, fake.ActiveHydrates);
     }
@@ -571,7 +617,7 @@ public sealed class CloudMountTransactionTests : IDisposable
     {
         var fake = new FakeMountOperations();
         CloudMount mount = Open(fake);
-        await mount.MountAsync();
+        await mount.MountAsync(TestContext.Current.CancellationToken);
         await mount.DisposeAsync();
         await mount.DisposeAsync();
         Assert.Equal(1, fake.Calls.Count(x => x == "disconnect"));
@@ -584,7 +630,7 @@ public sealed class CloudMountTransactionTests : IDisposable
     {
         var fake = new FakeMountOperations();
         await using CloudMount mount = Open(fake);
-        await mount.MountAsync();
+        await mount.MountAsync(TestContext.Current.CancellationToken);
         Assert.Equal(new uint[] { 0, 2, uint.MaxValue }, fake.CallbackTypes);
     }
 
@@ -597,7 +643,7 @@ public sealed class CloudMountTransactionTests : IDisposable
                 throw new IOException("disconnect failed");
         });
         CloudMount mount = Open(fake);
-        await mount.MountAsync();
+        await mount.MountAsync(TestContext.Current.CancellationToken);
         await Assert.ThrowsAsync<IOException>(() => mount.DisposeAsync().AsTask());
         Assert.Equal(MountState.Faulted, mount.State);
         Assert.True(fake.Registered);
@@ -621,7 +667,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         });
         await using CloudMount mount = Open(fake);
         AggregateException error = await Assert.ThrowsAsync<AggregateException>(() =>
-            mount.MountAsync()
+            mount.MountAsync(TestContext.Current.CancellationToken)
         );
         Assert.Contains("original connection error", error.InnerExceptions[0].Message);
         Assert.Contains("rollback unregister error", error.InnerExceptions[1].ToString());
@@ -643,7 +689,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         });
         await using CloudMount mount = Open(fake);
         AggregateException error = await Assert.ThrowsAsync<AggregateException>(() =>
-            mount.MountAsync()
+            mount.MountAsync(TestContext.Current.CancellationToken)
         );
 
         Assert.Contains("startup failure", error.InnerExceptions[0].Message);
@@ -656,6 +702,8 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task Rollback_UnregisterFails_CleanupCanBeRetried()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var fake = new FakeMountOperations(name =>
         {
             switch (name)
@@ -667,11 +715,17 @@ public sealed class CloudMountTransactionTests : IDisposable
             }
         });
         await using (CloudMount failed = Open(fake))
-            await Assert.ThrowsAsync<AggregateException>(() => failed.MountAsync());
+        {
+            await Assert.ThrowsAsync<AggregateException>(() =>
+                failed.MountAsync(testCancellationToken)
+            );
+        }
 
         await using (CloudMount blocked = Open(fake))
         {
-            IOException error = await Assert.ThrowsAsync<IOException>(() => blocked.MountAsync());
+            IOException error = await Assert.ThrowsAsync<IOException>(() =>
+                blocked.MountAsync(testCancellationToken)
+            );
             Assert.Contains("Mount directory is missing", error.Message);
         }
 
@@ -680,7 +734,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         Assert.False(fake.Registered);
         Assert.False(Directory.Exists(Root));
         await using CloudMount fresh = Open(fake);
-        await fresh.MountAsync();
+        await fresh.MountAsync(testCancellationToken);
         Assert.Equal(MountState.Mounted, fresh.State);
     }
 
@@ -707,7 +761,9 @@ public sealed class CloudMountTransactionTests : IDisposable
         try
         {
             await using CloudMount mount = Open(fake);
-            await Assert.ThrowsAsync<AggregateException>(() => mount.MountAsync());
+            await Assert.ThrowsAsync<AggregateException>(() =>
+                mount.MountAsync(TestContext.Current.CancellationToken)
+            );
             Assert.False(fake.Registered);
             Assert.True(Directory.Exists(Root));
             Assert.False(fake.Registered);

@@ -14,6 +14,8 @@ public sealed class MountCleanupTests
     [Fact]
     public async Task CleanupMounts_RemovesExistingMountAndLeavesPathReusable()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string parent = Path.Combine(
             Path.GetTempPath(),
             "WinCfApiWrapper.IntegrationTests",
@@ -35,7 +37,7 @@ public sealed class MountCleanupTests
                 )
             )
             {
-                await mount.MountAsync();
+                await mount.MountAsync(testCancellationToken);
                 actualRoot = mount.Root;
             }
 
@@ -53,7 +55,7 @@ public sealed class MountCleanupTests
                 )
             )
             {
-                await fresh.MountAsync();
+                await fresh.MountAsync(testCancellationToken);
                 Assert.Equal(actualRoot, fresh.Root);
             }
         }

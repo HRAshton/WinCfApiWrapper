@@ -9,7 +9,11 @@ public sealed class ContainerStreamSourceTests
     public void OpenReadable_NullFactoryResultIsRejected()
     {
         Assert.Throws<InvalidDataException>(() =>
-            ContainerStreamSource.OpenReadable(_ => null!, default, "Compressed")
+            ContainerStreamSource.OpenReadable(
+                _ => null!,
+                TestContext.Current.CancellationToken,
+                "Compressed"
+            )
         );
     }
 
@@ -19,7 +23,11 @@ public sealed class ContainerStreamSourceTests
         var stream = new UnreadableStream();
 
         Assert.Throws<InvalidDataException>(() =>
-            ContainerStreamSource.OpenReadable(_ => stream, default, "Compressed")
+            ContainerStreamSource.OpenReadable(
+                _ => stream,
+                TestContext.Current.CancellationToken,
+                "Compressed"
+            )
         );
 
         Assert.True(stream.WasDisposed);
@@ -32,7 +40,7 @@ public sealed class ContainerStreamSourceTests
 
         using Stream opened = ContainerStreamSource.OpenReadable(
             _ => stream,
-            default,
+            TestContext.Current.CancellationToken,
             "Compressed"
         );
 

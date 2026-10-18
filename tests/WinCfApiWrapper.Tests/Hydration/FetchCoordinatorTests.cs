@@ -67,7 +67,10 @@ public sealed class FetchCoordinatorTests : IDisposable
         await using (coordinator)
         {
             Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), 8192, 0, 4096);
-            await completed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await completed.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken
+            );
         }
 
         Assert.Empty(errors);
@@ -207,7 +210,10 @@ public sealed class FetchCoordinatorTests : IDisposable
         await using (coordinator)
         {
             Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), 131072);
-            await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await failed.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken
+            );
         }
 
         Assert.Equal(2, calls.Count);
@@ -224,13 +230,18 @@ public sealed class FetchCoordinatorTests : IDisposable
     {
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
         var failed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reported = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var errors = new List<(string? Path, Exception Error)>();
         await using var coordinator = new FetchCoordinator(
             catalog,
             container,
             1,
             1,
-            (path, error) => errors.Add((path, error)),
+            (path, error) =>
+            {
+                errors.Add((path, error));
+                reported.TrySetResult();
+            },
             new NativeTransfer(
                 (_, call) =>
                 {
@@ -241,7 +252,8 @@ public sealed class FetchCoordinatorTests : IDisposable
         );
 
         Invoke(coordinator, Encoding.UTF8.GetBytes("missing.txt"), 8);
-        await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(failed.Task, reported.Task)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.Contains(
             errors,
@@ -272,7 +284,10 @@ public sealed class FetchCoordinatorTests : IDisposable
         );
 
         Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), 8);
-        await reported.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await reported.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken
+        );
 
         Assert.Contains(errors, error => error.Message.Contains("failure completion failed"));
         Assert.Contains(errors, error => error.Message.Contains("source failed"));
@@ -303,7 +318,10 @@ public sealed class FetchCoordinatorTests : IDisposable
         );
 
         Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), 8192, 4096, 4096);
-        TransferCall failure = await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        TransferCall failure = await failed.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken
+        );
 
         Assert.Equal(4096, failure.Offset);
         Assert.Equal(4096, failure.Length);

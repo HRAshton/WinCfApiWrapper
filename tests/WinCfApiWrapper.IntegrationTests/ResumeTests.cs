@@ -15,6 +15,8 @@ public sealed class ResumeTests
     [Fact]
     public async Task ChangedArchive_CreatesSeparateMount()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string root = FixtureArchive.Root();
         string otherSource = Path.Combine(
             Path.GetTempPath(),
@@ -40,9 +42,9 @@ public sealed class ResumeTests
                 )
             )
             {
-                await first.MountAsync();
+                await first.MountAsync(testCancellationToken);
                 registered = true;
-                await first.HydrateAsync("docs/hello.txt");
+                await first.HydrateAsync("docs/hello.txt", testCancellationToken);
             }
 
             await using (
@@ -55,7 +57,7 @@ public sealed class ResumeTests
                 )
             )
             {
-                await changed.MountAsync();
+                await changed.MountAsync(testCancellationToken);
                 otherRoot = changed.Root;
                 Assert.NotEqual(FixtureArchive.MountedRoot(root), otherRoot);
                 Assert.True(changed.Contains("different.txt"));
@@ -63,7 +65,8 @@ public sealed class ResumeTests
 
             Assert.True(Directory.Exists(FixtureArchive.MountedRoot(root)));
             string hydratedContent = await File.ReadAllTextAsync(
-                Path.Combine(FixtureArchive.MountedRoot(root), "docs", "hello.txt")
+                Path.Combine(FixtureArchive.MountedRoot(root), "docs", "hello.txt"),
+                testCancellationToken
             );
             Assert.Equal("Hello from a checked-in ZIP fixture!\n", hydratedContent);
 
@@ -74,10 +77,13 @@ public sealed class ResumeTests
                     Root = root,
                 }
             );
-            await valid.MountAsync();
+            await valid.MountAsync(testCancellationToken);
             Assert.Equal(
                 "Nested content\n",
-                await File.ReadAllTextAsync(Path.Combine(valid.Root, "docs", "nested", "info.txt"))
+                await File.ReadAllTextAsync(
+                    Path.Combine(valid.Root, "docs", "nested", "info.txt"),
+                    testCancellationToken
+                )
             );
         }
         finally
@@ -100,6 +106,8 @@ public sealed class ResumeTests
     [Fact]
     public async Task Resume_IdenticalArchiveAtAnotherPath_RetainsFileContent()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string root = FixtureArchive.Root();
         string copy = root + ".zip";
         Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
@@ -117,9 +125,9 @@ public sealed class ResumeTests
             );
             try
             {
-                await first.MountAsync();
+                await first.MountAsync(testCancellationToken);
                 registered = true;
-                await first.HydrateAsync("docs/hello.txt");
+                await first.HydrateAsync("docs/hello.txt", testCancellationToken);
             }
             finally
             {
@@ -135,14 +143,20 @@ public sealed class ResumeTests
             );
             try
             {
-                await second.MountAsync();
+                await second.MountAsync(testCancellationToken);
                 Assert.Equal(
                     "Hello from a checked-in ZIP fixture!\n",
-                    await File.ReadAllTextAsync(second.Resolve("docs/hello.txt"))
+                    await File.ReadAllTextAsync(
+                        second.Resolve("docs/hello.txt"),
+                        testCancellationToken
+                    )
                 );
                 Assert.Equal(
                     "Nested content\n",
-                    await File.ReadAllTextAsync(second.Resolve("docs/nested/info.txt"))
+                    await File.ReadAllTextAsync(
+                        second.Resolve("docs/nested/info.txt"),
+                        testCancellationToken
+                    )
                 );
             }
             finally

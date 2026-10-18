@@ -19,7 +19,12 @@ public sealed class ParallelHttpConnectionsTests
     [Trait("Category", "Transport")]
     public async Task ArchiveFactory_OpensSeekableStreamsOverParallelHttpConnections()
     {
-        byte[] archive = await File.ReadAllBytesAsync(FixtureArchive.LocalPath);
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
+        byte[] archive = await File.ReadAllBytesAsync(
+            FixtureArchive.LocalPath,
+            testCancellationToken
+        );
         await using var server = new LoopbackRangeServer(archive);
         Uri archiveUrl = server.Url;
         server.ObserveRequests(true);
@@ -27,10 +32,14 @@ public sealed class ParallelHttpConnectionsTests
         Task<Stream>[] opens = Enumerable
             .Range(0, 2)
             .Select(_ =>
-                Task.Run(() => OpenArchive(SharedClient, archiveUrl, CancellationToken.None))
+                Task.Run(
+                    () => OpenArchive(SharedClient, archiveUrl, testCancellationToken),
+                    testCancellationToken
+                )
             )
             .ToArray();
-        Stream[] streams = await Task.WhenAll(opens).WaitAsync(TimeSpan.FromSeconds(20));
+        Stream[] streams = await Task.WhenAll(opens)
+            .WaitAsync(TimeSpan.FromSeconds(20), testCancellationToken);
         await using (streams[0])
         await using (streams[1])
         {
@@ -51,7 +60,12 @@ public sealed class ParallelHttpConnectionsTests
     [Fact]
     public async Task HydrateAll_ReadsEntriesThroughHttpArchiveFactory()
     {
-        byte[] archive = await File.ReadAllBytesAsync(FixtureArchive.LocalPath);
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
+        byte[] archive = await File.ReadAllBytesAsync(
+            FixtureArchive.LocalPath,
+            testCancellationToken
+        );
         await using var server = new LoopbackRangeServer(archive);
         Uri archiveUrl = server.Url;
         string root = FixtureArchive.Root();
@@ -67,11 +81,15 @@ public sealed class ParallelHttpConnectionsTests
         bool registered = false;
         try
         {
-            await mount.MountAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            await mount
+                .MountAsync(testCancellationToken)
+                .WaitAsync(TimeSpan.FromSeconds(30), testCancellationToken);
             registered = true;
             server.ObserveRequests();
 
-            await mount.HydrateAllAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            await mount
+                .HydrateAllAsync(cancellationToken: testCancellationToken)
+                .WaitAsync(TimeSpan.FromSeconds(30), testCancellationToken);
 
             Assert.True(
                 server.DistinctConnections >= 2,
@@ -80,11 +98,14 @@ public sealed class ParallelHttpConnectionsTests
             Assert.Empty(server.Errors);
             Assert.Equal(
                 "Hello from a checked-in ZIP fixture!\n",
-                await File.ReadAllTextAsync(mount.Resolve("docs/hello.txt"))
+                await File.ReadAllTextAsync(mount.Resolve("docs/hello.txt"), testCancellationToken)
             );
             Assert.Equal(
                 "Nested content\n",
-                await File.ReadAllTextAsync(mount.Resolve("docs/nested/info.txt"))
+                await File.ReadAllTextAsync(
+                    mount.Resolve("docs/nested/info.txt"),
+                    testCancellationToken
+                )
             );
         }
         finally

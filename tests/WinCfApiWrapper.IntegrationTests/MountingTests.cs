@@ -16,6 +16,8 @@ public sealed class MountingTests
     [Fact]
     public async Task Mount_DoesNotPreventSourceArchiveDeletion()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string root = FixtureArchive.Root();
         string source = Path.Combine(Path.GetDirectoryName(root)!, Path.GetFileName(root) + ".zip");
         Directory.CreateDirectory(Path.GetDirectoryName(source)!);
@@ -37,9 +39,9 @@ public sealed class MountingTests
         bool registered = false;
         try
         {
-            await mount.MountAsync();
+            await mount.MountAsync(testCancellationToken);
             registered = true;
-            await mount.HydrateAsync("docs/hello.txt");
+            await mount.HydrateAsync("docs/hello.txt", testCancellationToken);
 
             File.Delete(source);
             Assert.False(File.Exists(source));
@@ -63,6 +65,8 @@ public sealed class MountingTests
     [Fact]
     public async Task Dispose_AfterHydration_ReleasesSourceArchiveHandles()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string root = FixtureArchive.Root();
         string source = Path.Combine(Path.GetDirectoryName(root)!, Path.GetFileName(root) + ".zip");
         Directory.CreateDirectory(Path.GetDirectoryName(source)!);
@@ -83,9 +87,9 @@ public sealed class MountingTests
         bool registered = false;
         try
         {
-            await mount.MountAsync();
+            await mount.MountAsync(testCancellationToken);
             registered = true;
-            await mount.HydrateAsync("docs/hello.txt");
+            await mount.HydrateAsync("docs/hello.txt", testCancellationToken);
 
             await mount.DisposeAsync();
 
@@ -116,6 +120,8 @@ public sealed class MountingTests
     [Fact]
     public async Task DisposedAndUnregisteredMount_DoesNotPreventRootDeletion()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string root = FixtureArchive.Root();
         ICloudMount mount = new CloudMountFactory(NullLogger<CloudMount>.Instance).Open(
             new CloudMountOptions
@@ -127,9 +133,9 @@ public sealed class MountingTests
         bool registered = false;
         try
         {
-            await mount.MountAsync();
+            await mount.MountAsync(testCancellationToken);
             registered = true;
-            await mount.HydrateAsync("docs/hello.txt");
+            await mount.HydrateAsync("docs/hello.txt", testCancellationToken);
             await mount.DisposeAsync();
 
             new SyncRootManager(NullLogger<SyncRootManager>.Instance).Unregister(mount.Root);
@@ -147,6 +153,8 @@ public sealed class MountingTests
     [Fact]
     public async Task Mount_CreatesPlaceholdersAndReadsBytes()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string root = FixtureArchive.Root();
         ICloudMount mount = new CloudMountFactory(NullLogger<CloudMount>.Instance).Open(
             new CloudMountOptions
@@ -158,13 +166,13 @@ public sealed class MountingTests
         bool registered = false;
         try
         {
-            await mount.MountAsync();
+            await mount.MountAsync(testCancellationToken);
             registered = true;
             Assert.Equal(MountState.Mounted, mount.State);
             Assert.True(mount.Contains("docs/hello.txt"));
             Assert.Equal(
                 "Hello from a checked-in ZIP fixture!\n",
-                await File.ReadAllTextAsync(mount.Resolve("docs/hello.txt"))
+                await File.ReadAllTextAsync(mount.Resolve("docs/hello.txt"), testCancellationToken)
             );
         }
         finally
@@ -178,6 +186,8 @@ public sealed class MountingTests
     [Fact]
     public async Task Mount_LocalFileCreation_SurvivesResumeWithoutChangingArchiveCatalog()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string root = FixtureArchive.Root();
         ICloudMount mount = new CloudMountFactory(NullLogger<CloudMount>.Instance).Open(
             new CloudMountOptions
@@ -189,12 +199,12 @@ public sealed class MountingTests
         bool registered = false;
         try
         {
-            await mount.MountAsync();
+            await mount.MountAsync(testCancellationToken);
             registered = true;
             string localDirectory = Path.Combine(mount.Root, "local");
             Directory.CreateDirectory(localDirectory);
             string localFile = Path.Combine(localDirectory, "note.txt");
-            await File.WriteAllTextAsync(localFile, "local only");
+            await File.WriteAllTextAsync(localFile, "local only", testCancellationToken);
             Assert.False(mount.Contains("local/note.txt"));
 
             await mount.DisposeAsync();
@@ -207,11 +217,17 @@ public sealed class MountingTests
                     Root = root,
                 }
             );
-            await resumed.MountAsync();
-            Assert.Equal("local only", await File.ReadAllTextAsync(localFile));
+            await resumed.MountAsync(testCancellationToken);
+            Assert.Equal(
+                "local only",
+                await File.ReadAllTextAsync(localFile, testCancellationToken)
+            );
             Assert.Equal(
                 "Hello from a checked-in ZIP fixture!\n",
-                await File.ReadAllTextAsync(resumed.Resolve("docs/hello.txt"))
+                await File.ReadAllTextAsync(
+                    resumed.Resolve("docs/hello.txt"),
+                    testCancellationToken
+                )
             );
         }
         finally

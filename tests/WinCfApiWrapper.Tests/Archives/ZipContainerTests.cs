@@ -12,6 +12,8 @@ public sealed class ZipContainerTests
     [Fact]
     public async Task IndexThenOpenRead_UsesSnapshotAndReleasesEachArchiveStream()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         byte[] archive = BuildArchive(("docs/", null), ("docs/readme.txt", "hello"));
         var sources = new List<TrackingStream>();
         var container = new ZipContainer(_ =>
@@ -22,7 +24,9 @@ public sealed class ZipContainerTests
             return stream;
         });
 
-        IReadOnlyCollection<ContainerEntry> entries = await container.GetEntriesAsync();
+        IReadOnlyCollection<ContainerEntry> entries = await container.GetEntriesAsync(
+            testCancellationToken
+        );
         ContainerEntry directory = Assert.Single(entries, entry => entry.IsDirectory);
         ContainerEntry file = Assert.Single(entries, entry => !entry.IsDirectory);
         Assert.Equal("docs", directory.RelativePath);
@@ -32,9 +36,9 @@ public sealed class ZipContainerTests
         Assert.Single(sources);
         Assert.True(sources[0].WasDisposed);
 
-        Stream opened = await container.OpenReadAsync(file);
+        Stream opened = await container.OpenReadAsync(file, testCancellationToken);
         using (var reader = new StreamReader(opened))
-            Assert.Equal("hello", await reader.ReadToEndAsync());
+            Assert.Equal("hello", await reader.ReadToEndAsync(testCancellationToken));
 
         Assert.Equal(2, sources.Count);
         Assert.True(sources[1].WasDisposed);
@@ -43,6 +47,8 @@ public sealed class ZipContainerTests
     [Fact]
     public async Task ConcurrentIndexRequests_ShareOneArchiveScan()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         byte[] archive = BuildArchive(("file.txt", "payload"));
         int opens = 0;
         var container = new ZipContainer(_ =>
@@ -51,8 +57,12 @@ public sealed class ZipContainerTests
             return new MemoryStream(archive);
         });
 
-        Task<IReadOnlyCollection<ContainerEntry>> first = container.GetEntriesAsync().AsTask();
-        Task<IReadOnlyCollection<ContainerEntry>> second = container.GetEntriesAsync().AsTask();
+        Task<IReadOnlyCollection<ContainerEntry>> first = container
+            .GetEntriesAsync(testCancellationToken)
+            .AsTask();
+        Task<IReadOnlyCollection<ContainerEntry>> second = container
+            .GetEntriesAsync(testCancellationToken)
+            .AsTask();
         IReadOnlyCollection<ContainerEntry>[] results = await Task.WhenAll(first, second);
 
         Assert.Equal(1, opens);
@@ -66,29 +76,44 @@ public sealed class ZipContainerTests
     [Fact]
     public async Task OpenRead_RequiresAnEntryFromTheIndexedFileSnapshot()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var container = new ZipContainer(_ => new MemoryStream(BuildArchive(("file.txt", "one"))));
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await container.OpenReadAsync(new ContainerEntry("file.txt", 3, "version"))
+            await container.OpenReadAsync(
+                new ContainerEntry("file.txt", 3, "version"),
+                testCancellationToken
+            )
         );
 
-        ContainerEntry indexed = Assert.Single(await container.GetEntriesAsync());
-        await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await container.OpenReadAsync(indexed with { Length = 4 })
+        ContainerEntry indexed = Assert.Single(
+            await container.GetEntriesAsync(testCancellationToken)
         );
         await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await container.OpenReadAsync(indexed with { Version = "other" })
+            await container.OpenReadAsync(indexed with { Length = 4 }, testCancellationToken)
         );
         await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await container.OpenReadAsync(new ContainerEntry("missing.txt", 3, indexed.Version))
+            await container.OpenReadAsync(indexed with { Version = "other" }, testCancellationToken)
         );
         await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await container.OpenReadAsync(new ContainerEntry("folder", 0, string.Empty, true))
+            await container.OpenReadAsync(
+                new ContainerEntry("missing.txt", 3, indexed.Version),
+                testCancellationToken
+            )
+        );
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await container.OpenReadAsync(
+                new ContainerEntry("folder", 0, string.Empty, true),
+                testCancellationToken
+            )
         );
     }
 
     [Fact]
     public async Task OpenRead_WhenArchiveChangesAfterIndexing_RejectsAndReleasesStream()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         byte[] original = BuildArchive(("file.txt", "original"));
         byte[] changed = BuildArchive(("file.txt", "replacement"));
         var sources = new List<TrackingStream>();
@@ -99,9 +124,13 @@ public sealed class ZipContainerTests
             sources.Add(stream);
             return stream;
         });
-        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync());
+        ContainerEntry entry = Assert.Single(
+            await container.GetEntriesAsync(testCancellationToken)
+        );
 
-        await Assert.ThrowsAsync<IOException>(async () => await container.OpenReadAsync(entry));
+        await Assert.ThrowsAsync<IOException>(async () =>
+            await container.OpenReadAsync(entry, testCancellationToken)
+        );
 
         Assert.Equal(2, sources.Count);
         Assert.All(sources, source => Assert.True(source.WasDisposed));
@@ -135,7 +164,9 @@ public sealed class ZipContainerTests
             opens++;
             return new MemoryStream(BuildArchive(("file.txt", "content")));
         });
-        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync());
+        ContainerEntry entry = Assert.Single(
+            await container.GetEntriesAsync(TestContext.Current.CancellationToken)
+        );
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
@@ -149,11 +180,15 @@ public sealed class ZipContainerTests
     [Fact]
     public async Task OpenRead_EntryStreamIsReadOnlyAndReleasesOwnerOnDispose()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         byte[] archive = BuildArchive(("file.txt", "payload"));
         TrackingStream? source = null;
         var container = new ZipContainer(_ => source = new TrackingStream(archive));
-        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync());
-        Stream opened = await container.OpenReadAsync(entry);
+        ContainerEntry entry = Assert.Single(
+            await container.GetEntriesAsync(testCancellationToken)
+        );
+        Stream opened = await container.OpenReadAsync(entry, testCancellationToken);
 
         Assert.Throws<NotSupportedException>(() => opened.Seek(0, SeekOrigin.Begin));
         Assert.Throws<NotSupportedException>(() => opened.SetLength(0));
@@ -170,23 +205,30 @@ public sealed class ZipContainerTests
     [Fact]
     public async Task OpenRead_SupportsTheReadPatternsUsedByCallers()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         var container = new ZipContainer(_ => new MemoryStream(
             BuildArchive(("file.txt", "payload"))
         ));
-        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync());
+        ContainerEntry entry = Assert.Single(
+            await container.GetEntriesAsync(testCancellationToken)
+        );
 
-        await using Stream opened = await container.OpenReadAsync(entry);
+        await using Stream opened = await container.OpenReadAsync(entry, testCancellationToken);
         byte[] first = new byte[2];
         Assert.Equal(2, opened.Read(first, 0, first.Length));
         Assert.Equal("pa", Encoding.UTF8.GetString(first));
         Assert.Equal("yl", ReadTwoBytes(opened));
 
         byte[] next = new byte[1];
-        Assert.Equal(1, await opened.ReadAsync(next.AsMemory()));
+        Assert.Equal(1, await opened.ReadAsync(next.AsMemory(), testCancellationToken));
         Assert.Equal("o", Encoding.UTF8.GetString(next));
 
         byte[] remaining = new byte[2];
-        Assert.Equal(2, await opened.ReadAsync(remaining, 0, remaining.Length));
+        Assert.Equal(
+            2,
+            await opened.ReadAsync(remaining, 0, remaining.Length, testCancellationToken)
+        );
         Assert.Equal("ad", Encoding.UTF8.GetString(remaining));
     }
 
@@ -195,6 +237,8 @@ public sealed class ZipContainerTests
     [InlineData(true)]
     public async Task OpenRead_Dispose_ReleasesSharedArchiveHandle(bool disposeAsync)
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string path = Path.Combine(Path.GetTempPath(), $"WinCfApiWrapper.{Guid.NewGuid():N}.zip");
         var handles = new List<SafeFileHandle>();
         try
@@ -202,7 +246,7 @@ public sealed class ZipContainerTests
             await File.WriteAllBytesAsync(
                 path,
                 BuildArchive(("file.txt", "payload")),
-                TestContext.Current.CancellationToken
+                testCancellationToken
             );
             var container = new ZipContainer(_ =>
             {
@@ -216,15 +260,12 @@ public sealed class ZipContainerTests
                 return stream;
             });
             ContainerEntry entry = Assert.Single(
-                await container.GetEntriesAsync(TestContext.Current.CancellationToken)
+                await container.GetEntriesAsync(testCancellationToken)
             );
             Assert.True(Assert.Single(handles).IsClosed);
 
             await using (
-                Stream opened = await container.OpenReadAsync(
-                    entry,
-                    TestContext.Current.CancellationToken
-                )
+                Stream opened = await container.OpenReadAsync(entry, testCancellationToken)
             )
             {
                 Assert.Equal(2, handles.Count);

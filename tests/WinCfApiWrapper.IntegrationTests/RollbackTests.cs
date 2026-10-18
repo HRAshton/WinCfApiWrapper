@@ -26,7 +26,7 @@ public sealed class RollbackTests
                 new FaultingNativeMountOperations(true)
             );
             AggregateException error = await Assert.ThrowsAsync<AggregateException>(() =>
-                failed.MountAsync()
+                failed.MountAsync(TestContext.Current.CancellationToken)
             );
             Assert.Contains("unregistration failure", error.ToString());
             Assert.True(Directory.Exists(FixtureArchive.MountedRoot(root)));
@@ -54,6 +54,8 @@ public sealed class RollbackTests
     [Fact]
     public async Task Mount_NativePlaceholderFailure_LeavesRootReusable()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         string root = FixtureArchive.Root();
         await using (
             var failed = new CloudMount(
@@ -66,7 +68,9 @@ public sealed class RollbackTests
             )
         )
         {
-            IOException error = await Assert.ThrowsAsync<IOException>(() => failed.MountAsync());
+            IOException error = await Assert.ThrowsAsync<IOException>(() =>
+                failed.MountAsync(testCancellationToken)
+            );
             Assert.Contains("Injected failure", error.Message);
         }
 
@@ -83,7 +87,7 @@ public sealed class RollbackTests
         bool registered = false;
         try
         {
-            await fresh.MountAsync();
+            await fresh.MountAsync(testCancellationToken);
             registered = true;
             Assert.Equal(MountState.Mounted, fresh.State);
         }

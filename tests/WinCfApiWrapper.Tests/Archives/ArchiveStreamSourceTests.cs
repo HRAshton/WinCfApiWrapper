@@ -8,6 +8,8 @@ public sealed class ArchiveStreamSourceTests
     [Fact]
     public void OpenRead_RequestsIndependentStreamForEachCall()
     {
+        CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
+
         int calls = 0;
         var source = new ArchiveStreamSource(_ =>
         {
@@ -16,8 +18,8 @@ public sealed class ArchiveStreamSourceTests
             return new MemoryStream([1, 2, 3]);
         });
 
-        using Stream first = source.OpenRead();
-        using Stream second = source.OpenRead();
+        using Stream first = source.OpenRead(testCancellationToken);
+        using Stream second = source.OpenRead(testCancellationToken);
 
         Assert.NotSame(first, second);
         Assert.Equal(2, calls);
@@ -30,7 +32,7 @@ public sealed class ArchiveStreamSourceTests
         stream.Position = 2;
         var source = new ArchiveStreamSource(_ => stream);
 
-        using Stream opened = source.OpenRead();
+        using Stream opened = source.OpenRead(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, opened.Position);
         Assert.Equal(1, opened.ReadByte());
@@ -42,7 +44,9 @@ public sealed class ArchiveStreamSourceTests
         var stream = new NonSeekableStream();
         var source = new ArchiveStreamSource(_ => stream);
 
-        Assert.Throws<InvalidDataException>(() => source.OpenRead());
+        Assert.Throws<InvalidDataException>(() =>
+            source.OpenRead(TestContext.Current.CancellationToken)
+        );
         Assert.False(stream.CanRead);
     }
 
@@ -86,7 +90,9 @@ public sealed class ArchiveStreamSourceTests
     {
         var source = new ArchiveStreamSource(_ => null!);
 
-        Assert.Throws<InvalidDataException>(() => source.OpenRead());
+        Assert.Throws<InvalidDataException>(() =>
+            source.OpenRead(TestContext.Current.CancellationToken)
+        );
     }
 
     private sealed class NonSeekableStream : MemoryStream
