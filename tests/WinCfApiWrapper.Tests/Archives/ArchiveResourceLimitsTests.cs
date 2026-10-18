@@ -60,6 +60,38 @@ public sealed class ArchiveResourceLimitsTests
             await accepted.GetEntriesAsync(TestContext.Current.CancellationToken)).Length);
     }
 
+    [Theory]
+    [InlineData("Brotli")]
+    [InlineData("Deflate")]
+    [InlineData("ZLib")]
+    public async Task OtherCompressedFormats_EnforceDecodedByteLimit(string format)
+    {
+        using var output = new MemoryStream();
+        using (Stream compressor = format switch
+        {
+            "Brotli" => new BrotliStream(output, CompressionLevel.Optimal, true),
+            "Deflate" => new DeflateStream(output, CompressionLevel.Optimal, true),
+            "ZLib" => new ZLibStream(output, CompressionLevel.Optimal, true),
+            _ => throw new ArgumentOutOfRangeException(nameof(format)),
+        })
+        {
+            compressor.Write(new byte[64]);
+        }
+
+        byte[] data = output.ToArray();
+        var limits = new ArchiveResourceLimits { MaxBufferedBytes = 63 };
+        IContentContainer container = format switch
+        {
+            "Brotli" => new BrotliContainer(_ => new MemoryStream(data), limits: limits),
+            "Deflate" => new DeflateContainer(_ => new MemoryStream(data), limits: limits),
+            "ZLib" => new ZLibContainer(_ => new MemoryStream(data), limits: limits),
+            _ => throw new ArgumentOutOfRangeException(nameof(format)),
+        };
+
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await container.GetEntriesAsync(TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public async Task Zip_BoundsEntriesButStreamsBytes()
     {
@@ -81,7 +113,16 @@ public sealed class ArchiveResourceLimitsTests
 
         var accepted = new ZipContainer(_ => new MemoryStream(data),
             limits with { MaxEntries = 2 });
-        Assert.Equal(2, (await accepted.GetEntriesAsync(TestContext.Current.CancellationToken)).Count);
+        IReadOnlyCollection<ContainerEntry> entries =
+            await accepted.GetEntriesAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, entries.Count);
+
+        await using Stream bytes = await accepted.OpenReadAsync(
+            entries.Single(entry => entry.RelativePath == "one"),
+            TestContext.Current.CancellationToken
+        );
+        using var reader = new StreamReader(bytes);
+        Assert.Equal("payload", await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
