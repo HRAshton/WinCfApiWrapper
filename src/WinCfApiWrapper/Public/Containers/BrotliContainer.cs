@@ -13,6 +13,12 @@ public sealed class BrotliContainer(
     ArchiveResourceLimits? limits = null
 ) : CompressedContainer(openStream, entryName, limits)
 {
+    /// <summary>Initializes a compressed container using the default decoding limits.</summary>
+    /// <param name="openStream">A factory that returns compressed data.</param>
+    /// <param name="entryName">The file name exposed inside the mount.</param>
+    public BrotliContainer(Func<CancellationToken, Stream> openStream, string entryName)
+        : this(openStream, entryName, null) { }
+
     /// <inheritdoc />
     protected override Stream CreateDecoder(Stream source)
     {

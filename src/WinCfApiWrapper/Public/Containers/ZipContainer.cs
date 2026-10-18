@@ -26,6 +26,11 @@ public sealed class ZipContainer(
 
     private ZipCatalog? _catalog;
 
+    /// <summary>Initializes a ZIP container with default archive entry limits.</summary>
+    /// <param name="openArchive">A factory for independent readable, seekable streams.</param>
+    public ZipContainer(Func<CancellationToken, Stream> openArchive)
+        : this(openArchive, null) { }
+
     /// <inheritdoc />
     public async ValueTask<IReadOnlyCollection<ContainerEntry>> GetEntriesAsync(
         CancellationToken cancellationToken = default
