@@ -33,6 +33,7 @@ jobs:
           results_file: results.sarif
           results_format: sarif
           publish_results: true
+          fail_on_publish_error: true
 
       - name: Upload Scorecard results
         if: always()
