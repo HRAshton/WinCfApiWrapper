@@ -13,7 +13,7 @@
   "semanticCommits": "enabled",
   "commitMessageLowerCase": "never",
   "automergeType": "pr",
-  "platformAutomerge": true,
+  "platformAutomerge": false,
   "packageRules": [
     {
       "description": "One Monday PR for every non-major (minor or patch) update",
