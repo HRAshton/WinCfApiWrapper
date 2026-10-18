@@ -13,6 +13,43 @@ public sealed class ArchiveResourceLimitsTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task Tar_RootDirectoryCountsAgainstEntryBudget(bool gzip)
+    {
+        using var output = new MemoryStream();
+        Stream archiveStream = gzip
+            ? new GZipStream(output, CompressionLevel.Optimal, true)
+            : output;
+        using (var writer = new TarWriter(archiveStream, true))
+        {
+            writer.WriteEntry(new PaxTarEntry(TarEntryType.Directory, "./"));
+            using var content = new MemoryStream([1]);
+            writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, "file.txt")
+            {
+                DataStream = content,
+            });
+        }
+
+        if (gzip)
+            archiveStream.Dispose();
+
+        byte[] bytes = output.ToArray();
+        var limits = new ArchiveResourceLimits { MaxEntries = 1, MaxBufferedBytes = 1 };
+        IContentContainer rejected = CreateTar(gzip, bytes, limits);
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await rejected.GetEntriesAsync(TestContext.Current.CancellationToken)
+        );
+
+        IContentContainer accepted = CreateTar(gzip, bytes, limits with { MaxEntries = 2 });
+        ContainerEntry entry = Assert.Single(
+            await accepted.GetEntriesAsync(TestContext.Current.CancellationToken)
+        );
+        Assert.Equal("file.txt", entry.RelativePath);
+        Assert.Equal(1, entry.Length);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task Tar_BoundsTotalDecodedBytesAndEntryCount(bool gzip)
     {
         byte[] source = MakeTar(gzip);

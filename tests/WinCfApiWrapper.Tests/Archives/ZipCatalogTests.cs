@@ -6,6 +6,21 @@ namespace WinCfApiWrapper.Tests.Archives;
 
 public sealed class ZipCatalogTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Constructor_NonPositiveEntryLimit_RejectsAndDisposesSource(int maxEntries)
+    {
+        using MemoryStream source = BuildArchive("file.txt");
+
+        ArgumentOutOfRangeException error = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ZipCatalog(source, maxEntries)
+        );
+
+        Assert.Equal("maxEntries", error.ParamName);
+        Assert.False(source.CanRead);
+    }
+
     [Fact]
     public void Constructor_ValidArchive_IndexesFilesAndDirectories()
     {
