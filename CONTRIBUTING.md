@@ -25,7 +25,7 @@ Start with [the development guide](docs/development.md) for exact build/test com
 6. Run the applicable commands from [docs/development.md](docs/development.md) and describe any tests you could not run.
 7. Open a pull request with the motivation, implementation summary, testing evidence, and compatibility/security implications.
 
-The repository uses required CI checks and protected `master` rules. Do not try to bypass protection or suppress analysis to make a PR pass. Maintainers review changes under the configured GitHub rulesets.
+Pull requests must pass the checks required by the repository rulesets.
 
 ## Change-specific guidance
 
@@ -37,5 +37,3 @@ The repository uses required CI checks and protected `master` rules. Do not try 
 ## Reporting problems
 
 For regular bugs, include the library version, Windows build, .NET version, minimal reproduction, expected versus actual behavior, and relevant logs without credentials or private file content. Use private vulnerability reporting for security issues.
-
-The maintainer may request changes or defer features that broaden platform support, increase attack surface, or cannot be tested reliably.

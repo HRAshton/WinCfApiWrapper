@@ -53,9 +53,9 @@ Call `ISyncRootManager.Unregister(mount.Root)` after disposing the mount to unre
 
 ## Code map
 
-- `src/WinCfApiWrapper/Public/` — published contracts
-- `src/WinCfApiWrapper/Mounting/` — lifecycle, registration, and placeholders
-- `src/WinCfApiWrapper/Hydration/` — fetch scheduling and native transfers
-- `src/WinCfApiWrapper/Containers/` and `Archives/` — indexing, format readers, and validation
-- `tests/WinCfApiWrapper.Tests/` — unit/property tests
-- `tests/WinCfApiWrapper.IntegrationTests/` — Windows native, offline, stress, and opt-in live tests
+- `src/WinCfApiWrapper/Public/`: published contracts
+- `src/WinCfApiWrapper/Mounting/`: lifecycle, registration, and placeholders
+- `src/WinCfApiWrapper/Hydration/`: fetch scheduling and native transfers
+- `src/WinCfApiWrapper/Containers/` and `Archives/`: indexing, format readers, and validation
+- `tests/WinCfApiWrapper.Tests/`: unit/property tests
+- `tests/WinCfApiWrapper.IntegrationTests/`: Windows native, offline, stress, and opt-in live tests

@@ -69,12 +69,12 @@ Public interfaces and built-in containers are in `WinCfApiWrapper.Public` and `W
 ## Guides and contributing
 
 - [Documentation index](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/README.md)
-- [Containers](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/containers.md) — built-in formats, stream ownership, and custom container contracts.
-- [Architecture and lifecycle](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/architecture.md) — hydration, errors, resume, and safe cleanup.
-- [Development](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/development.md) — building, testing, fuzzing, and coverage.
-- [Security model](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/security-model.md) — trust boundaries and limitations.
-- [Releasing and provenance](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/releasing.md) — release cadence, package verification, and recovery.
-- [Contributing](https://github.com/HRAshton/WinCfApiWrapper/blob/master/CONTRIBUTING.md) — submitting issues, tests, and pull requests.
-- [Security policy](https://github.com/HRAshton/WinCfApiWrapper/blob/master/SECURITY.md) — private vulnerability reporting.
+- [Containers](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/containers.md): built-in formats, stream ownership, and custom container contracts.
+- [Architecture and lifecycle](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/architecture.md): hydration, errors, resume, and safe cleanup.
+- [Development](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/development.md): building, testing, fuzzing, and coverage.
+- [Security model](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/security-model.md): trust boundaries and limitations.
+- [Releasing and provenance](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/releasing.md): release cadence, package verification, and recovery.
+- [Contributing](https://github.com/HRAshton/WinCfApiWrapper/blob/master/CONTRIBUTING.md): submitting issues, tests, and pull requests.
+- [Security policy](https://github.com/HRAshton/WinCfApiWrapper/blob/master/SECURITY.md): private vulnerability reporting.
 
 Report ordinary bugs and request features through [GitHub issues](https://github.com/HRAshton/WinCfApiWrapper/issues). Report vulnerabilities privately using the security policy.

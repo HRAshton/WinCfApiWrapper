@@ -28,7 +28,7 @@ dotnet test tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTe
 dotnet test tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj -c Release -f net10.0-windows --filter "Category=Offline"
 ```
 
-`tests/WinCfApiWrapper.Tests/Fuzzing/InputBoundaryProperties.cs` contains FsCheck property-based tests for path and transfer-range invariants. These are randomized property tests, not a substitute for coverage-guided fuzzing of complete archive parsers.
+`tests/WinCfApiWrapper.Tests/Fuzzing/InputBoundaryProperties.cs` uses FsCheck to generate inputs for path and transfer-range checks. Archive parsers require separate coverage-guided fuzzing.
 
 ## Coverage
 
@@ -36,7 +36,7 @@ dotnet test tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTe
 dotnet test tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj -c Release -f net8.0-windows --settings tests/coverage.runsettings --collect "Code Coverage"
 ```
 
-CI uploads Cobertura reports to Codecov, enforces repository coverage rules, and excludes selected generated/native adapter code in `tests/coverage.runsettings`. Do not treat the reported percentage as complete coverage of Windows native interop. Preserve or extend focused integration tests when modifying excluded code.
+CI uploads Cobertura reports to Codecov and excludes selected generated/native adapter code in `tests/coverage.runsettings`. Do not treat the reported percentage as complete coverage of Windows native interop. Preserve or extend focused integration tests when modifying excluded code.
 
 ## Opt-in live end-to-end tests
 

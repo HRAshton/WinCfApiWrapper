@@ -1,12 +1,12 @@
 # Security model and limitations
 
-This document describes security-relevant assumptions and implementation boundaries; it is **not** a guarantee that arbitrary untrusted archives or streams are safe. Report vulnerabilities privately through [SECURITY.md](../SECURITY.md).
+This guide describes the library's trust boundaries, safeguards, and remaining risks. Report vulnerabilities privately through [SECURITY.md](../SECURITY.md).
 
 ## Intended use and trust boundaries
 
 WinCfApiWrapper mounts caller-provided read-only container content as Windows Cloud Files placeholders on an NTFS sync root. The host application controls the container provider, source bytes, mount base directory, and permissions. The library is not a sandbox, malware scanner, or bidirectional filesystem synchronization engine.
 
-Important boundaries are: **untrusted archive/remote content → container parser → normalized entries → filesystem placeholders → Cloud Files native callbacks**. Compromise or malformed behavior at any boundary may have consequences for the host application's filesystem, memory, and availability.
+Important boundaries are: **untrusted archive/remote content -> container parser -> normalized entries -> filesystem placeholders -> Cloud Files native callbacks**. Compromise or malformed behavior at any boundary may have consequences for the host application's filesystem, memory, and availability.
 
 ## Existing safeguards
 
@@ -15,8 +15,6 @@ Important boundaries are: **untrusted archive/remote content → container parse
 - Existing placeholders are checked before resuming a mount; mismatches cause an error rather than silently reusing stale state.
 - Cleanup recognizes fingerprinted mount names, and mount operations reject volume-root base paths. Unregistered reparse-point mount roots are rejected during cleanup.
 - Releases are built through protected automation with verifiable provenance and package verification.
-
-These controls reduce specific classes of risk; they do not eliminate all hazards from untrusted data.
 
 ## Residual risks and operator responsibilities
 

@@ -28,9 +28,18 @@ available, open a **public issue requesting a private reporting channel only**,
 without including the vulnerability details, and coordinate a secure channel
 with the maintainer before sending sensitive information.
 
-Repository maintainers: private vulnerability reporting must be enabled in repository
-security settings for the reporting form to be available. A `SECURITY.md` file alone
-does not enable it.
+## Response and triage expectations
+
+The maintainer aims to acknowledge a private vulnerability report within **7 calendar
+days** and provide a progress update at least every **14 calendar days** while it is
+being investigated. These are best-effort targets, not guaranteed remediation
+deadlines; response may be slower when the sole maintainer is unavailable.
+
+Reports are triaged based on reproducibility, exploitability, impact, and affected
+supported versions. If the report is out of scope or not reproducible, the
+maintainer will explain the assessment through the private reporting channel.
+Where a fix is needed, the reporter and maintainer should agree on a reasonable
+disclosure timeline without exposing users to avoidable harm.
 
 ## Coordinated disclosure
 
