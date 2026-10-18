@@ -1,6 +1,7 @@
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Text;
+using WinCfApiWrapper.Containers.Base;
 using WinCfApiWrapper.Public;
 using WinCfApiWrapper.Public.Containers;
 using Xunit;
@@ -134,6 +135,46 @@ public sealed class ArchiveResourceLimitsTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new GZipContainer(_ => new MemoryStream(),
                 limits: new ArchiveResourceLimits { MaxBufferedBytes = 0 }));
+    }
+
+    [Fact]
+    public async Task BufferedContainer_DefensivelyChecksEntryCount()
+    {
+        var limits = new ArchiveResourceLimits { MaxEntries = 1 };
+        var container = new TestBufferedContainer(
+            limits,
+            new BufferedEntry("one", [1]),
+            new BufferedEntry("two", [2])
+        );
+
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await container.GetEntriesAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task BufferedContainer_DefensivelyChecksAggregateBytes()
+    {
+        var limits = new ArchiveResourceLimits { MaxBufferedBytes = 1 };
+        var container = new TestBufferedContainer(
+            limits,
+            new BufferedEntry("one", [1]),
+            new BufferedEntry("two", [2])
+        );
+
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await container.GetEntriesAsync(TestContext.Current.CancellationToken));
+    }
+
+    private sealed class TestBufferedContainer(
+        ArchiveResourceLimits limits,
+        params BufferedEntry[] decoded
+    ) : BufferedContainer(limits)
+    {
+        protected override IEnumerable<BufferedEntry> Decode(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return decoded;
+        }
     }
 
     private static IContentContainer CreateTar(bool gzip, byte[] bytes, ArchiveResourceLimits limits)
