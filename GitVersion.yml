@@ -2,7 +2,6 @@
 # Release tags (vX.Y.Z) anchor subsequent calculations.
 workflow: GitHubFlow/v1
 strategies:
-  - ConfiguredNextVersion
   - Mainline
 tag-prefix: '[vV]?'
 branches:
