@@ -28,6 +28,19 @@ available, open a **public issue requesting a private reporting channel only**,
 without including the vulnerability details, and coordinate a secure channel
 with the maintainer before sending sensitive information.
 
+## Response and triage expectations
+
+The maintainer aims to acknowledge a private vulnerability report within **7 calendar
+days** and provide a progress update at least every **14 calendar days** while it is
+being investigated. These are best-effort targets, not guaranteed remediation
+deadlines; response may be slower when the sole maintainer is unavailable.
+
+Reports are triaged based on reproducibility, exploitability, impact, and affected
+supported versions. If the report is out of scope or not reproducible, the
+maintainer will explain the assessment through the private reporting channel.
+Where a fix is needed, the reporter and maintainer should agree on a reasonable
+disclosure timeline without exposing users to avoidable harm.
+
 ## Coordinated disclosure
 
 Please allow the maintainer time to confirm, investigate, and remediate an issue before

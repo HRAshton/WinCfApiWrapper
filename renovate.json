@@ -6,7 +6,9 @@
     "helpers:pinGitHubActionDigests"
   ],
   "timezone": "Europe/Belgrade",
-  "schedule": ["* * * * 1"],
+  "schedule": [
+    "* * * * 1"
+  ],
   "updateNotScheduled": false,
   "semanticCommits": "enabled",
   "commitMessageLowerCase": "never",
@@ -15,19 +17,27 @@
   "packageRules": [
     {
       "description": "One Monday PR for every non-major (minor or patch) update",
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "groupName": "weekly non-major dependencies",
       "groupSlug": "weekly-non-major",
       "automerge": true
     },
     {
-      "description": "Each major update gets its own PR and can automerge after CI",
-      "matchUpdateTypes": ["major"],
-      "automerge": true
+      "description": "Major dependency upgrades require maintainer review; no automerge",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false
     },
     {
       "description": "Automerge pinned and updated dependency digests after CI",
-      "matchUpdateTypes": ["pinDigest", "digest"],
+      "matchUpdateTypes": [
+        "pinDigest",
+        "digest"
+      ],
       "automerge": true
     }
   ]

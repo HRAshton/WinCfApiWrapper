@@ -36,6 +36,28 @@ Repeat for `.snupkg`. Inspect the manifest and release tag, and check that the v
 
 Existing `v0.1.0` has attestations in GitHub's attestation store, but predates the downloadable `.intoto.jsonl` asset. For that release, omit `--bundle` to verify against GitHub's attestation store.
 
+## Security releases and release notes
+
+Security fixes may be published outside the Thursday schedule using the
+maintainer-controlled manual release workflow. Do not postpone an urgent fix
+solely to meet the regular cadence. Follow
+[SECURITY.md](../SECURITY.md) when coordinating reports and disclosure.
+
+For public security fixes, release notes should identify:
+
+- Affected versions, the first fixed version, and concrete upgrade instructions.
+- The impact and conditions needed to trigger the issue, without publishing
+  exploit details before coordinated disclosure.
+- The linked GitHub Security Advisory (and CVE identifier, if assigned) once
+  disclosure is public, plus any required workarounds.
+- How to verify the fixed NuGet artifact and its build provenance.
+
+For non-security releases, publish a concise list of meaningful user-visible
+functional changes, breaking changes, and migration requirements. GitHub's
+generated changelog can supplement, but should not replace, this summary.
+Never overwrite an existing NuGet version or move an immutable release tag;
+publish a new version for a corrected release.
+
 ## Failed or partial publication
 
 The release script is designed to reconcile draft tags/releases and an already-uploaded NuGet package. Re-run the release workflow following the documented recovery path; do not move immutable tags, replace packages, fabricate attestations, or ignore hash mismatches. Investigate failed provenance verification rather than attempting an unsigned/manual alternative.
