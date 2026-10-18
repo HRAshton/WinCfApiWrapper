@@ -9,6 +9,29 @@ Maintainers use the release workflow for publication and recovery.
 - `.github/workflows/release.yml` schedules publication on Thursdays in the `Europe/Belgrade` timezone, and also supports a manual `workflow_dispatch`.
 - Publication is skipped when there are no qualifying new commits; unexpected or partially completed releases should be recovered through the release workflow rather than repacked manually.
 
+## Intentional major releases
+
+`GitVersion.yml` uses patch increments on `master`. To request a major release,
+include `+semver: major` in the **final commit message on `master`**.
+When using GitHub **Squash and merge**, preserve this marker in the squash
+commit title or body. A marker only in a PR description or an unsquashed
+feature-branch commit is not sufficient.
+
+After merging and before starting publication, check the calculated version
+from `master` with a complete local history and tags:
+
+```powershell
+git checkout master
+git pull --ff-only
+git fetch --tags
+dotnet-gitversion /showvariable MajorMinorPatch /config GitVersion.yml
+```
+
+For the initial stable release, the output must be `1.0.0`. If the version is
+unexpected, fix the versioning before dispatching **Publish NuGet** on `master`.
+The release workflow creates its own tag and stages verified artifacts; do not
+create `v1.0.0` manually or upload a NuGet package outside that workflow.
+
 ## Build and publish stages
 
 1. **Resolve:** Determine intended commit, version, tag, and whether there is new content to publish.
