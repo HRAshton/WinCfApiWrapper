@@ -14,6 +14,13 @@ A .NET library for exposing caller-provided content containers as Windows Cloud 
 
 See [the library README](src/WinCfApiWrapper/README.md) for usage, the container contract, and mount lifecycle details.
 
+## Guides
+
+- [Contributing](CONTRIBUTING.md) — submitting issues, tests, and pull requests.
+- [Documentation index](docs/README.md) — architecture, container integration, development, security, and releasing.
+- [Security model](docs/security-model.md) — trust boundaries and limitations.
+- [Security policy](SECURITY.md) — private vulnerability reporting.
+
 Releases are versioned with GitVersion and published to NuGet on Thursdays only when `master` has new commits.
 
 ## Verifying release provenance

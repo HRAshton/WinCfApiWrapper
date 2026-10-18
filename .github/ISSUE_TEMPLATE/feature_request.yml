@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an improvement or additional integration scenario.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and use case
+      description: What are you trying to accomplish?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the public API or behavior you expect.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and tradeoffs
+      description: Workarounds, compatibility, Windows/.NET constraints, resource and security implications.
+    validations:
+      required: false
