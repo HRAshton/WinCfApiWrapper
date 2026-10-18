@@ -13,7 +13,7 @@ public sealed class TarGZipContainer(
 )
     : BufferedContainer(limits)
 {
-    /// <summary>Initializes an archive container using the default decoding limits.</summary>
+    /// <summary>Initializes a new instance of the <see cref="TarGZipContainer" /> class.</summary>
     /// <param name="openArchive">A factory that returns a readable archive stream.</param>
     public TarGZipContainer(Func<CancellationToken, Stream> openArchive)
         : this(openArchive, null) { }

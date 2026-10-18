@@ -11,11 +11,11 @@ public abstract class BufferedContainer : IContentContainer
     private ContainerCatalog? _catalog;
     private Dictionary<string, byte[]>? _contents;
 
-    /// <summary>Initializes a buffered container with default resource limits.</summary>
+    /// <summary>Initializes a new instance of the <see cref="BufferedContainer" /> class.</summary>
     protected BufferedContainer()
         : this(null) { }
 
-    /// <summary>Initializes a buffered container with validated resource limits.</summary>
+    /// <summary>Initializes a new instance of the <see cref="BufferedContainer" /> class.</summary>
     /// <param name="limits">Optional limits on decoded bytes and entries.</param>
     protected BufferedContainer(ArchiveResourceLimits? limits)
     {

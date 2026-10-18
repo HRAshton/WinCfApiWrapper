@@ -8,7 +8,7 @@ public abstract class CompressedContainer : BufferedContainer
     private readonly string _entryName;
     private readonly Func<CancellationToken, Stream> _openCompressedStream;
 
-    /// <summary>Initializes a compressed container using the default decoding limits.</summary>
+    /// <summary>Initializes a new instance of the <see cref="CompressedContainer" /> class.</summary>
     /// <param name="openCompressedStream">A factory that returns a readable compressed stream.</param>
     /// <param name="entryName">The file name exposed inside the mount.</param>
     protected CompressedContainer(

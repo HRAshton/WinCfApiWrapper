@@ -13,7 +13,7 @@ public sealed class DeflateContainer(
     ArchiveResourceLimits? limits = null
 ) : CompressedContainer(openStream, entryName, limits)
 {
-    /// <summary>Initializes a compressed container using the default decoding limits.</summary>
+    /// <summary>Initializes a new instance of the <see cref="DeflateContainer" /> class.</summary>
     /// <param name="openStream">A factory that returns compressed data.</param>
     /// <param name="entryName">The file name exposed inside the mount.</param>
     public DeflateContainer(Func<CancellationToken, Stream> openStream, string entryName)

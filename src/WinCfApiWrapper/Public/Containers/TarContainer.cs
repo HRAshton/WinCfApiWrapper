@@ -11,7 +11,7 @@ public sealed class TarContainer(
     ArchiveResourceLimits? limits = null
 ) : BufferedContainer(limits)
 {
-    /// <summary>Initializes an archive container using the default decoding limits.</summary>
+    /// <summary>Initializes a new instance of the <see cref="TarContainer" /> class.</summary>
     /// <param name="openArchive">A factory that returns a readable archive stream.</param>
     public TarContainer(Func<CancellationToken, Stream> openArchive)
         : this(openArchive, null) { }
