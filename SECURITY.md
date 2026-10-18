@@ -28,10 +28,6 @@ available, open a **public issue requesting a private reporting channel only**,
 without including the vulnerability details, and coordinate a secure channel
 with the maintainer before sending sensitive information.
 
-Repository maintainers: private vulnerability reporting must be enabled in repository
-security settings for the reporting form to be available. A `SECURITY.md` file alone
-does not enable it.
-
 ## Coordinated disclosure
 
 Please allow the maintainer time to confirm, investigate, and remediate an issue before

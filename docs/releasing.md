@@ -1,6 +1,6 @@
 # Releasing and provenance
 
-This guide documents the existing release pipeline. Releases and any exceptional recovery are maintainer activities, not part of a typical contributor pull request.
+Maintainers use the release workflow for publication and recovery.
 
 ## Sources and cadence
 
@@ -17,7 +17,7 @@ This guide documents the existing release pipeline. Releases and any exceptional
 4. **Publish:** The `nuget` GitHub environment obtains a short-lived credential via NuGet Trusted Publishing and publishes the original package.
 5. **Reconcile:** The workflow verifies the repository-signed NuGet package content against the attested original, then finalizes the GitHub Release.
 
-Release assets include `.nupkg`, `.snupkg`, a `.intoto.jsonl` attestation bundle, and `release-manifest.json`. Sigstore/in-toto provenance establishes the source/workflow identity and package digest; it is **not** a claim of third-party certification to a particular SLSA level.
+Release assets include `.nupkg`, `.snupkg`, a `.intoto.jsonl` attestation bundle, and `release-manifest.json`. Provenance identifies the source commit, build workflow, and package digests; it does not certify a SLSA level.
 
 ## Verify an existing release
 
@@ -42,7 +42,8 @@ The release script is designed to reconcile draft tags/releases and an already-u
 
 ## Maintainer checklist
 
-- Confirm the branch is in a releasable state with required CI and CodeQL results.
+- Confirm the branch is in a releasable state with required CI and security-analysis results.
+- Enable private vulnerability reporting in the repository security settings so the reporting form linked by `SECURITY.md` is available. The policy file alone does not enable it.
 - Review Renovate changes, especially major updates and changes to build/release dependencies.
 - Confirm the `nuget` environment and Trusted Publishing configuration.
 - After publication, verify that the GitHub Release is finalized, the NuGet package is indexed, and the published package matches the attested original.

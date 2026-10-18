@@ -59,7 +59,7 @@ public sealed class InputBoundaryProperties
     [Property(MaxTest = 1000)]
     public void InvalidRequests_AreRejected(long offset, long length, long fileLength)
     {
-        // Compare using decimal so the independent oracle cannot overflow on hostile long values.
+        // Use decimal arithmetic to check validity without overflowing.
         bool valid = fileLength > 0 && offset >= 0 && length > 0
             && (decimal)offset + length <= fileLength;
         if (!valid)

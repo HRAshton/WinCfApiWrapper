@@ -267,7 +267,6 @@ public sealed class CancelFetchTests : IDisposable
         }
         finally
         {
-            // Finish cleanup even when the test runner cancels the test.
             await coordinator
                 .DisposeAsync()
                 .AsTask()
@@ -392,7 +391,6 @@ public sealed class CancelFetchTests : IDisposable
         }
         finally
         {
-            // Finish cleanup even when the test runner cancels the test.
             await coordinator
                 .DisposeAsync()
                 .AsTask()
