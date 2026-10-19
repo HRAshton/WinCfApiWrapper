@@ -364,38 +364,4 @@ public sealed class ZipDirectoryTests
         writer.Write(end);
         return output.ToArray();
     }
-
-    private sealed class ReadTrackingStream(byte[] bytes) : MemoryStream(bytes)
-    {
-        public long BytesRead { get; private set; }
-
-        public int ReadCalls { get; private set; }
-
-        public void ResetCounts()
-        {
-            BytesRead = 0;
-            ReadCalls = 0;
-        }
-
-        public override int Read(byte[] buffer, int offset, int count)
-        {
-            int read = base.Read(buffer, offset, count);
-            if (read > 0)
-            {
-                BytesRead += read;
-                ReadCalls++;
-            }
-
-            return read;
-        }
-
-        public override ValueTask<int> ReadAsync(
-            Memory<byte> buffer,
-            CancellationToken cancellationToken = default
-        )
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Read(buffer.Span));
-        }
-    }
 }
