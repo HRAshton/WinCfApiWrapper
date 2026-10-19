@@ -303,6 +303,57 @@ public sealed class HttpZipContainerTests
         );
     }
 
+    [Theory]
+    [InlineData("identity", false)]
+    [InlineData("gzip", true)]
+    public async Task ContentEncoding_IsValidatedOnEveryResponse(string encoding, bool rejected)
+    {
+        using var handler = new RangeHandler(BuildArchive([1, 2, 3], 1));
+        using var client = new HttpClient(handler);
+        ZipContainer container = ZipContainer.FromHttp(
+            client,
+            new Uri("https://archive.test/files.zip")
+        );
+        CancellationToken token = TestContext.Current.CancellationToken;
+        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync(token));
+        handler.ContentEncoding = encoding;
+
+        if (rejected)
+        {
+            await Assert.ThrowsAsync<IOException>(async () =>
+                await container.OpenReadAsync(entry, token)
+            );
+        }
+        else
+        {
+            await using Stream input = await container.OpenReadAsync(entry, token);
+            byte[] actual = new byte[3];
+            await input.ReadExactlyAsync(actual, token);
+            Assert.Equal(new byte[] { 1, 2, 3 }, actual);
+        }
+    }
+
+    [Fact]
+    public void RangeStream_EnforcesReadOnlyContract_AndDoesNotFetchAtEnd()
+    {
+        using var handler = new RangeHandler(BuildArchive([1, 2, 3], 1));
+        using var client = new HttpClient(handler);
+        var source = new HttpArchiveSource(client, new Uri("https://archive.test/files.zip"));
+        using Stream input = source.OpenRead(TestContext.Current.CancellationToken);
+        Assert.True(input.CanRead);
+        Assert.True(input.CanSeek);
+        Assert.False(input.CanWrite);
+        Assert.Equal(input.Length, input.Seek(0, SeekOrigin.End));
+        int requests = handler.Ranges.Count;
+        Span<byte> buffer = stackalloc byte[1];
+        Assert.Equal(0, input.Read(buffer));
+        Assert.Equal(requests, handler.Ranges.Count);
+        Assert.Throws<ArgumentOutOfRangeException>(() => input.Seek(0, (SeekOrigin)123));
+        Assert.Throws<NotSupportedException>(() => input.Flush());
+        Assert.Throws<NotSupportedException>(() => input.SetLength(0));
+        Assert.Throws<NotSupportedException>(() => input.Write(new byte[1], 0, 1));
+    }
+
     private static byte[] BuildArchive(byte[] payload, int count)
     {
         using var output = new MemoryStream();
@@ -329,6 +380,8 @@ public sealed class HttpZipContainerTests
         public string? ETag { get; set; } = "\"snapshot\"";
 
         public DateTimeOffset? Modified { get; set; }
+
+        public string? ContentEncoding { get; set; }
 
         public int ProbeCount => Volatile.Read(ref _probes);
 
@@ -372,6 +425,8 @@ public sealed class HttpZipContainerTests
             string? etag = ChangeVersionAfterProbe && end != 0 ? "\"changed\"" : ETag;
             response.Headers.ETag = etag is null ? null : EntityTagHeaderValue.Parse(etag);
             response.Content.Headers.LastModified = Modified;
+            if (ContentEncoding is { } encoding)
+                response.Content.Headers.ContentEncoding.Add(encoding);
             response.Content.Headers.ContentRange = new ContentRangeHeaderValue(
                 start,
                 end,
