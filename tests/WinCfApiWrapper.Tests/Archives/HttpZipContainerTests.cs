@@ -380,6 +380,41 @@ public sealed class HttpZipContainerTests
         Assert.Throws<NotSupportedException>(() => input.Write(new byte[1], 0, 1));
     }
 
+    [Fact]
+    public async Task DisposedRangeStream_RejectsCursorAndReadOperations_WithoutRequests()
+    {
+        using var handler = new RangeHandler(BuildArchive([1, 2, 3], 1));
+        using var client = new HttpClient(handler);
+        var source = new HttpArchiveSource(client, new Uri("https://archive.test/files.zip"));
+        using Stream input = source.OpenRead(TestContext.Current.CancellationToken);
+        input.Dispose();
+        int requests = handler.Ranges.Count;
+        Assert.False(input.CanRead);
+        Assert.False(input.CanSeek);
+        Assert.False(input.CanWrite);
+        Assert.Throws<ObjectDisposedException>(() => input.Length);
+        Assert.Throws<ObjectDisposedException>(() => input.Position);
+        Assert.Throws<ObjectDisposedException>(() => input.Position = 0);
+        Assert.Throws<ObjectDisposedException>(() => input.Position = -1);
+        foreach (
+            SeekOrigin origin in new[]
+            {
+                SeekOrigin.Begin,
+                SeekOrigin.Current,
+                SeekOrigin.End,
+                (SeekOrigin)123,
+            }
+        )
+            Assert.Throws<ObjectDisposedException>(() => input.Seek(0, origin));
+        byte[] buffer = new byte[1];
+        Assert.Throws<ObjectDisposedException>(() => input.Read(buffer, 0, 1));
+        Assert.Throws<ObjectDisposedException>(() => input.Read(buffer.AsSpan()));
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+            _ = await input.ReadAsync(buffer.AsMemory(), TestContext.Current.CancellationToken)
+        );
+        Assert.Equal(requests, handler.Ranges.Count);
+    }
+
     [Theory]
     [InlineData("Bytes")]
     [InlineData("BYTES")]

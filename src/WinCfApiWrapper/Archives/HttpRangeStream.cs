@@ -15,13 +15,28 @@ internal sealed class HttpRangeStream(
     public override bool CanRead => !_disposed;
     public override bool CanSeek => !_disposed;
     public override bool CanWrite => false;
-    public override long Length => snapshot.Length;
+
+    public override long Length
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return snapshot.Length;
+        }
+    }
 
     public override long Position
     {
-        get => _position;
-        set =>
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _position;
+        }
+        set
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             _position = value >= 0 ? value : throw new ArgumentOutOfRangeException(nameof(value));
+        }
     }
 
     public override int Read(byte[] buffer, int offset, int count) =>
@@ -85,6 +100,7 @@ internal sealed class HttpRangeStream(
 
     public override long Seek(long offset, SeekOrigin origin)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         Position = origin switch
         {
             SeekOrigin.Begin => offset,
