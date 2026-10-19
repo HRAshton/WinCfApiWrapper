@@ -32,6 +32,46 @@ public sealed class FetchCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task Fetch_LargeFile_TransfersAndReportsEveryChunk()
+    {
+        int length = (NativeTransfer.BufferSize * 3) + 17;
+        WriteArchive(length);
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        var calls = new List<TransferCall>();
+        var progress = new List<OperationProgress>();
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            1,
+            1,
+            (_, _) => { },
+            new NativeTransfer((_, call) => calls.Add(call)),
+            progress: report =>
+            {
+                progress.Add(report);
+                if (report.Completed == length)
+                    finished.TrySetResult();
+            }
+        );
+        await using (coordinator)
+        {
+            Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), length);
+            await finished.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken
+            );
+        }
+
+        Assert.Equal(4, calls.Count);
+        Assert.All(calls, call => Assert.InRange(call.Length, 1, NativeTransfer.BufferSize));
+        Assert.Equal(length, calls.Sum(call => call.Length));
+        Assert.Equal(4, progress.Count);
+        Assert.Equal(length, progress[^1].Completed);
+        Assert.Equal(0, coordinator.Statistics.FailedFetches);
+    }
+
+    [Fact]
     public async Task OnFetch_RepeatedKeyDuringCompletion_TransfersBothRanges()
     {
         WriteArchive(8192);

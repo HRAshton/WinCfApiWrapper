@@ -143,6 +143,7 @@ internal sealed class CloudMount : ICloudMount
             _logger.LogInformation("Mounting content source at base path {BasePath}", _basePath);
             try
             {
+                ReportProgress(new OperationProgress("Indexing", 0));
                 IReadOnlyCollection<ContainerEntry> entries = await _container
                     .GetEntriesAsync(cancellationToken)
                     .ConfigureAwait(false);
@@ -166,6 +167,7 @@ internal sealed class CloudMount : ICloudMount
                 await Task.Run(() => SetupNative(cancellationToken), cancellationToken)
                     .ConfigureAwait(false);
                 _state = MountState.Mounted;
+                ReportProgress(new OperationProgress("Mounted", 1, 1));
                 _logger.LogInformation(
                     "Mount ready at {Root} with {EntryCount} files",
                     Root,
@@ -339,11 +341,13 @@ internal sealed class CloudMount : ICloudMount
 
             _disposed = true;
             _state = MountState.Stopping;
+            ReportProgress(new OperationProgress("Stopping", 0));
             _logger.LogInformation("Stopping mount at {Root}", _root ?? _basePath);
             try
             {
                 await CleanupAsync().ConfigureAwait(false);
                 _state = MountState.Stopped;
+                ReportProgress(new OperationProgress("Stopped", 1, 1));
                 _logger.LogInformation("Mount stopped at {Root}", _root ?? _basePath);
             }
             catch (Exception ex)
@@ -364,6 +368,17 @@ internal sealed class CloudMount : ICloudMount
     {
         ContainerCatalog catalog = _catalog!;
         bool resume = Directory.Exists(Root);
+        long total = catalog.Directories.Count + catalog.Entries.Count;
+        long completed = 0;
+        string stage = resume ? "Validating" : "CreatingPlaceholders";
+        var progress = new ProgressThrottle();
+        void ReportSetupProgress(string? path = null)
+        {
+            if (_options.Progress is not null && progress.ShouldReport(completed, total))
+                ReportProgress(new OperationProgress(stage, completed, total, path));
+        }
+
+        ReportSetupProgress();
         _logger.LogInformation(
             "{MountAction} sync root {Root}",
             resume ? "Resuming" : "Creating",
@@ -383,6 +398,8 @@ internal sealed class CloudMount : ICloudMount
                     && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0;
                 if (!isValidDirectory)
                     throw new IOException($"Mount directory is missing or invalid: {path}");
+                completed++;
+                ReportSetupProgress(directory);
             }
 
             foreach (ContainerEntry entry in catalog.Entries.Values)
@@ -391,6 +408,8 @@ internal sealed class CloudMount : ICloudMount
                 string file = Path.Combine(Root, entry.RelativePath);
                 if (!_options.SkipResumeValidation)
                     _operations.ValidatePlaceholder(file, entry);
+                completed++;
+                ReportSetupProgress(entry.RelativePath);
             }
         }
         else
@@ -423,7 +442,8 @@ internal sealed class CloudMount : ICloudMount
             _options.FetchQueueCapacity,
             ReportBackgroundError,
             _transfer,
-            _openEntry
+            _openEntry,
+            _options.Progress is null ? null : ReportProgress
         );
         CF_CALLBACK_REGISTRATION[] registrations =
         [
@@ -449,6 +469,8 @@ internal sealed class CloudMount : ICloudMount
                 ct.ThrowIfCancellationRequested();
                 string path = Path.Combine(Root, directory);
                 Directory.CreateDirectory(path);
+                completed++;
+                ReportSetupProgress(directory);
             }
 
             foreach (ContainerEntry entry in catalog.Entries.Values)
@@ -458,6 +480,8 @@ internal sealed class CloudMount : ICloudMount
                     ? Path.Combine(Root, dir)
                     : Root;
                 _operations.CreatePlaceholder(parent, Path.GetFileName(entry.RelativePath), entry);
+                completed++;
+                ReportSetupProgress(entry.RelativePath);
             }
 
             ct.ThrowIfCancellationRequested();
@@ -542,6 +566,20 @@ internal sealed class CloudMount : ICloudMount
         }
     }
 
+    private void ReportProgress(OperationProgress progress)
+    {
+        try
+        {
+            _options.Progress?.Report(progress);
+        }
+        catch (Exception ex)
+        {
+            // Only synchronous Report failures reach this catch. Progress<T>
+            // callbacks posted to a UI context must handle their own exceptions.
+            _logger.LogWarning(ex, "Progress.Report failed synchronously");
+        }
+    }
+
     // Track placeholder reads so the sync root is not disconnected under an in-flight request.
     private Task HydrateFileAsync(string name, CancellationToken token)
     {
@@ -580,6 +618,7 @@ internal sealed class CloudMount : ICloudMount
             try
             {
                 linked.Token.ThrowIfCancellationRequested();
+                ReportProgress(new OperationProgress("Hydrating", 0, 1, name));
                 using SafeFileHandle handle = File.OpenHandle(
                     Resolve(name),
                     FileMode.Open,
@@ -588,6 +627,7 @@ internal sealed class CloudMount : ICloudMount
                     FileOptions.Asynchronous
                 );
                 await _operations.HydrateAsync(handle, linked.Token).ConfigureAwait(false);
+                ReportProgress(new OperationProgress("Hydrating", 1, 1, name));
             }
             finally
             {

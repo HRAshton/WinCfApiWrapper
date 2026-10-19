@@ -53,6 +53,8 @@ await mount.HydrateAsync(@"docs\hello.txt");
 
 `MountAsync` creates or validates placeholders and connects the sync root; it does not download all files. Windows fetches contents when needed. Use `HydrateAsync(path)` for one file or `HydrateAllAsync(progress)` for all files. Bulk hydration reports progress and throws an `AggregateException` if any files fail. Background fetch failures are reported through `Error` and the configured logger.
 
+For remote ZIPs, use `ZipContainer.FromHttp(httpClient, archiveUri)` to fetch bounded byte ranges. A stream factory that downloads into a `MemoryStream` still downloads the archive on every invocation. Set `CloudMountOptions.Progress` to an `IProgress<OperationProgress>` for startup, resume, file fetch, explicit hydration, and shutdown updates. See [release feedback and performance](docs/release-feedback.md) for verified behavior and trusted-source settings.
+
 Use a dedicated, disposable mount folder containing no user data. `CloudMountOptions.Root` is a base path; the actual `mount.Root` includes a content fingerprint. Disposing the mount disconnects it. To unregister and delete the folder, call `ISyncRootManager.Unregister(mount.Root)` after disposal. See the [lifecycle and cleanup guide](https://github.com/HRAshton/WinCfApiWrapper/blob/master/docs/architecture.md#identity-re-use-and-cleanup) before integrating cleanup into an application.
 
 ## Public API
@@ -60,10 +62,10 @@ Use a dedicated, disposable mount folder containing no user data. `CloudMountOpt
 | Type | Purpose |
 | --- | --- |
 | `ICloudMountFactory` / `ICloudMount` | Open, mount, inspect, hydrate, and dispose a sync root. |
-| `CloudMountOptions` | Set the container, base path, and fetch/hydration concurrency limits. |
+| `CloudMountOptions` | Set the container, base path, concurrency limits, progress, and trusted-source options. |
 | `IContentContainer` / `ContainerEntry` | Provide a stable file and directory listing and streams for file contents. |
 | `ISyncRootManager` | Unregister mounts or clean abandoned mounts under an app-owned folder. |
-| `MountState`, `MountStatistics`, `MountErrorEventArgs`, `HydrationProgress` | Observe mount state, background failures, fetch activity, and bulk hydration progress. |
+| `MountState`, `MountStatistics`, `MountErrorEventArgs`, `HydrationProgress`, `OperationProgress` | Observe state, failures, fetch activity, and operation progress. |
 
 Public interfaces and built-in containers are in `WinCfApiWrapper.Public` and `WinCfApiWrapper.Public.Containers`. `AddWinCfApiWrapper()` is in `WinCfApiWrapper`. When the host registers `Microsoft.Extensions.Logging`, lifecycle and failure events are logged; otherwise the library uses a no-op logger.
 
