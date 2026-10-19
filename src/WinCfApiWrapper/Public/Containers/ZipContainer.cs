@@ -12,9 +12,11 @@ namespace WinCfApiWrapper.Public.Containers;
 /// return a seekable range stream.
 /// </remarks>
 /// <param name="limits">Optional archive entry limit; ZIP file contents remain streamed.</param>
+/// <param name="validateEntryMetadata">Whether to reread the selected entry's metadata before opening it.</param>
 public sealed class ZipContainer(
     Func<CancellationToken, Stream> openArchive,
-    ArchiveResourceLimits? limits = null
+    ArchiveResourceLimits? limits = null,
+    bool validateEntryMetadata = true
 ) : IContentContainer
 {
     private readonly SemaphoreSlim _indexLock = new(1, 1);
@@ -30,6 +32,12 @@ public sealed class ZipContainer(
     /// <param name="openArchive">A factory for independent readable, seekable streams.</param>
     public ZipContainer(Func<CancellationToken, Stream> openArchive)
         : this(openArchive, null) { }
+
+    /// <summary>Initializes a new instance of the <see cref="ZipContainer"/> class with resource limits.</summary>
+    /// <param name="openArchive">A factory for independent readable, seekable streams.</param>
+    /// <param name="limits">Optional archive resource limits.</param>
+    public ZipContainer(Func<CancellationToken, Stream> openArchive, ArchiveResourceLimits? limits)
+        : this(openArchive, limits, true) { }
 
     /// <inheritdoc />
     public async ValueTask<IReadOnlyCollection<ContainerEntry>> GetEntriesAsync(
@@ -93,7 +101,8 @@ public sealed class ZipContainer(
 
         ZipEntryInfo expectedEntry = expected!;
 
-        var reader = new ZipEntryReader(_source.OpenRead(cancellationToken));
+        var reader = new ZipEntryReader(ZipDirectory.OpenEntry(
+            _source.OpenRead(cancellationToken), expectedEntry, validateEntryMetadata));
         try
         {
             Stream stream = reader.OpenEntry(expectedEntry);

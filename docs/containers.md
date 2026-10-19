@@ -12,6 +12,10 @@ TAR and single-file compressed formats decode and buffer content in memory while
 
 For example, `new TarGZipContainer(openArchive, new ArchiveResourceLimits { MaxEntries = 500, MaxBufferedBytes = 32L * 1024 * 1024 })` reduces the budget. Single-file compressors accept `limits:` as their third constructor argument (after `entryName`). `ZipContainer` indexes archives of **200,000 files by default**, with headroom for explicit directory entries (250,000 entries total). It enforces the entry-count limit but **not** the buffered-byte limit, because ZIP files are streamed during hydration; large ZIP entries require separate upstream controls. The ZIP index and Windows placeholder creation still require memory and time proportional to the number of files. These budgets are not exact process memory/CPU limits. Prefer ZIP for large data or seekable range sources, and isolate hostile archives when appropriate. See [security-model.md](security-model.md).
 
+The directory is indexed once per container instance. Each subsequent file open uses its cached central record and validates just that record against the source; other directory records are not fetched or parsed. The source factory still runs for each open, so it must provide efficient seeking rather than eagerly downloading all bytes. Entries remain decoded by .NET `ZipArchive`, including ZIP64 entries.
+
+For a controlled immutable source, `new ZipContainer(openArchive, limits: null, validateEntryMetadata: false)` skips rereading the selected central record. Snapshot membership, archive length, safe paths, and .NET ZIP format checks remain enforced. This option does not make an arbitrary mutable source safe.
+
 ## `IContentContainer` contract
 
 `GetEntriesAsync(CancellationToken)` returns a collection of `ContainerEntry` objects. Each entry has:

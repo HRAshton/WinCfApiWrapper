@@ -137,6 +137,23 @@ public sealed class ZipContainerTests
     }
 
     [Fact]
+    public async Task OpenRead_OnlyTimestampChanges_RemainsTheSameContentSnapshot()
+    {
+        byte[] original = BuildArchive(("file.txt", "content"));
+        byte[] changed = (byte[])original.Clone();
+        int central = changed.AsSpan().IndexOf(new byte[] { 0x50, 0x4b, 0x01, 0x02 });
+        changed[central + 12] ^= 1;
+        int opens = 0;
+        var container = new ZipContainer(_ => new MemoryStream(opens++ == 0 ? original : changed));
+        CancellationToken token = TestContext.Current.CancellationToken;
+        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync(token));
+
+        await using Stream input = await container.OpenReadAsync(entry, token);
+        using var reader = new StreamReader(input);
+        Assert.Equal("content", await reader.ReadToEndAsync(token));
+    }
+
+    [Fact]
     public async Task GetEntries_CanceledBeforeIndexing_DoesNotOpenArchive()
     {
         int opens = 0;
