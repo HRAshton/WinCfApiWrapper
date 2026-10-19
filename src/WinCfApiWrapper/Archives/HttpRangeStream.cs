@@ -115,6 +115,6 @@ internal sealed class HttpRangeStream(
             && TaskScheduler.Current == TaskScheduler.Default
         )
             return ReadAsync(buffer).AsTask().GetAwaiter().GetResult();
-        return Task.Run(() => ReadAsync(buffer).AsTask()).GetAwaiter().GetResult();
+        return Task.Run(() => ReadAsync(buffer).AsTask(), token).GetAwaiter().GetResult();
     }
 }

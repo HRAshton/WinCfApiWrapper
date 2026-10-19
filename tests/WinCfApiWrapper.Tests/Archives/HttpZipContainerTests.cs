@@ -111,6 +111,7 @@ public sealed class HttpZipContainerTests
             DefaultRequestVersion = HttpVersion.Version20,
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact,
         };
+        client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("gzip, br");
         ZipContainer container = ZipContainer.FromHttp(
             client,
             new Uri("https://archive.test/files.zip")
@@ -159,8 +160,10 @@ public sealed class HttpZipContainerTests
         Assert.Equal(2, handler.ProbeCount);
     }
 
-    [Fact]
-    public async Task SynchronousReads_WithNonPumpingContext_SupportAsyncOnlyHandler()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SynchronousReads_WithNonPumpingContext_SupportAsyncOnlyHandler(bool canceled)
     {
         await Task.Run(
                 () =>
@@ -168,6 +171,7 @@ public sealed class HttpZipContainerTests
                     using var responses = new RangeHandler(BuildArchive([1, 2, 3], 1));
                     using var handler = new AsyncOnlyRangeHandler(responses);
                     using var client = new HttpClient(handler);
+                    using var lifetime = new CancellationTokenSource();
                     var source = new HttpArchiveSource(
                         client,
                         new Uri("https://archive.test/files.zip")
@@ -176,8 +180,22 @@ public sealed class HttpZipContainerTests
                     SynchronizationContext.SetSynchronizationContext(new NonPumpingContext());
                     try
                     {
-                        using Stream input = source.OpenRead(default);
+                        using Stream input = source.OpenRead(lifetime.Token);
                         byte[] actual = new byte[4];
+                        if (canceled)
+                        {
+                            int requests = responses.Ranges.Count;
+                            lifetime.Cancel();
+                            OperationCanceledException error =
+                                Assert.ThrowsAny<OperationCanceledException>(() =>
+                                    input.Read(actual, 0, actual.Length)
+                                );
+                            Assert.Equal(lifetime.Token, error.CancellationToken);
+                            Assert.Equal(requests, responses.Ranges.Count);
+                            Assert.Equal(0, input.Position);
+                            return;
+                        }
+
                         Assert.Equal(4, input.Read(actual, 0, actual.Length));
                         Assert.Equal(responses.Archive[..4], actual);
                         input.Position = 0;
@@ -520,6 +538,7 @@ public sealed class HttpZipContainerTests
         )
         {
             cancellationToken.ThrowIfCancellationRequested();
+            Assert.Equal("identity", request.Headers.AcceptEncoding.ToString());
             RangeItemHeaderValue range = Assert.Single(request.Headers.Range!.Ranges);
             long start = range.From!.Value;
             long end = range.To!.Value;
