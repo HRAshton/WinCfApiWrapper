@@ -12,13 +12,43 @@ TAR and single-file compressed formats decode and buffer content in memory while
 
 For example, `new TarGZipContainer(openArchive, new ArchiveResourceLimits { MaxEntries = 500, MaxBufferedBytes = 32L * 1024 * 1024 })` reduces the budget. Single-file compressors accept `limits:` as their third constructor argument (after `entryName`). `ZipContainer` indexes archives of **200,000 files by default**, with headroom for explicit directory entries (250,000 entries total). It enforces the entry-count limit but **not** the buffered-byte limit, because ZIP files are streamed during hydration; large ZIP entries require separate upstream controls. The ZIP index and Windows placeholder creation still require memory and time proportional to the number of files. These budgets are not exact process memory/CPU limits. Prefer ZIP for large data or seekable range sources, and isolate hostile archives when appropriate. See [security-model.md](security-model.md).
 
+## `IContentContainer` contract
+
+### Remote ZIP access
+
+Using the `ICloudMountFactory` from the [quick start](../README.md#quick-start):
+
+```csharp
+using var client = new HttpClient(
+    new SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.None }
+);
+var container = ZipContainer.FromHttp(client, new Uri("https://example.com/content.zip"));
+
+await using (
+    ICloudMount mount = factory.Open(
+        new CloudMountOptions { Container = container, Root = @"C:\Cloud\RemoteZip" }
+    )
+)
+{
+    await mount.MountAsync();
+    Console.WriteLine($"Mounted at {mount.Root}. Press Enter to unmount.");
+    Console.ReadLine();
+} // The mount is disposed before the client leaves its enclosing scope.
+```
+
+Keep the caller-owned client alive for the lifetime of the mount. Perform all mounted-file access inside the mount's `await using` block; do not return the container or mount from a scope that disposes its client. The server must return exact `206 Partial Content` responses with `Content-Range` and a strong ETag or Last-Modified validator. Requests use `If-Range`; changed versions, encoded responses, and full-download fallbacks fail rather than silently downloading the archive. Reads request at most 64 KiB and do not round small files to 1 MiB blocks.
+
+One initial probe pins the length and validator for the container's lifetime; opening files reuses that snapshot without probing again. Create a new container to read a replacement archive. Prefer strong ETags: the Last-Modified fallback cannot distinguish changes within the timestamp's precision. Disabling entry metadata validation does not disable HTTP range and archive-validator checks.
+
+HTTP requests use `SendAsync`, including for synchronous ZIP reads, so async-only handlers are supported. The client's default HTTP version and version policy are honored.
+
 The directory is indexed once per container instance. Each subsequent file open uses its cached central record and validates just that record against the source; other directory records are not fetched or parsed. The source factory still runs for each open, so it must provide efficient seeking rather than eagerly downloading all bytes. Entries remain decoded by .NET `ZipArchive`, including ZIP64 entries.
 
 ZIP discovery accepts trailing bytes after the archive comment, matching .NET `ZipArchive` within its bounded end-record search. Cached directory bytes are available only during directory parsing; entry opening and data reads use the original archive bounds. These bounds remain enforced when metadata consistency checks are disabled, without additional source reads.
 
 For a controlled immutable source, `new ZipContainer(openArchive, limits: null, validateEntryMetadata: false)` skips rereading the selected central record. Snapshot membership, archive length, safe paths, and .NET ZIP format checks remain enforced. This option does not make an arbitrary mutable source safe.
 
-## `IContentContainer` contract
+### Snapshot entries
 
 `GetEntriesAsync(CancellationToken)` returns a collection of `ContainerEntry` objects. Each entry has:
 

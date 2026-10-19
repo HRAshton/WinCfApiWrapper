@@ -327,6 +327,82 @@ public sealed class FetchCoordinatorTests : IDisposable
         Assert.Equal(4096, failure.Length);
     }
 
+    [Theory]
+    [InlineData(4096, false)]
+    [InlineData(2048, false)]
+    [InlineData(4097, false)]
+    [InlineData(-1, false)]
+    [InlineData(4096, true)]
+    public async Task Fetch_UsesActualSeekPosition_WithoutTransferringWrongBytes(
+        long seekResult,
+        bool sliced
+    )
+    {
+        const int start = 4096;
+        WriteArchive(8192);
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        byte[] payload = new byte[8192];
+        new Random(37).NextBytes(payload);
+        const int sliceOrigin = 37;
+        byte[] backing = new byte[payload.Length + sliceOrigin];
+        payload.CopyTo(backing, sliceOrigin);
+        Stream input = sliced
+            ? new MemoryStream(backing, sliceOrigin, payload.Length)
+            : new AdjustedSeekStream(payload, seekResult);
+        var completed = new TaskCompletionSource<TransferCall>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        byte[]? transferred = null;
+        var errors = new List<Exception>();
+        var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            1,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer(
+                (_, call) =>
+                {
+                    if (call.CompletionStatus == 0)
+                    {
+                        transferred = new byte[checked((int)call.Length)];
+                        Marshal.Copy(call.Buffer, transferred, 0, transferred.Length);
+                    }
+                    completed.TrySetResult(call);
+                }
+            ),
+            _ => input
+        );
+        TransferCall result;
+        await using (coordinator)
+        {
+            Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), payload.Length, start, start);
+            result = await completed.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken
+            );
+        }
+
+        if (input is AdjustedSeekStream adjusted)
+            Assert.Equal(1, adjusted.SeekCount);
+        Assert.Equal(start, result.Offset);
+        if (seekResult < 0 || seekResult > start)
+        {
+            Assert.Equal(NativeTransfer.StatusCloudFileUnsuccessful, result.CompletionStatus);
+            Assert.Null(transferred);
+            Assert.IsType<IOException>(Assert.Single(errors));
+            Assert.Equal(0, Assert.IsType<AdjustedSeekStream>(input).BytesRead);
+        }
+        else
+        {
+            Assert.Equal(0, result.CompletionStatus);
+            Assert.Equal(payload[start..], transferred);
+            Assert.Empty(errors);
+            if (input is AdjustedSeekStream counted)
+                Assert.Equal(payload.Length - seekResult, counted.BytesRead);
+        }
+    }
+
     private void WriteArchive(int length)
     {
         if (File.Exists(_source))
@@ -384,6 +460,37 @@ public sealed class FetchCoordinatorTests : IDisposable
             Marshal.FreeHGlobal(infoPointer);
             if (identityPointer != nint.Zero)
                 Marshal.FreeHGlobal(identityPointer);
+        }
+    }
+
+    private sealed class AdjustedSeekStream(byte[] data, long seekResult) : MemoryStream(data)
+    {
+        public int SeekCount { get; private set; }
+        public long BytesRead { get; private set; }
+
+        public override long Position
+        {
+            get => seekResult < 0 ? seekResult : base.Position;
+            set => base.Position = value;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            Assert.Equal(4096, offset);
+            Assert.Equal(SeekOrigin.Begin, origin);
+            SeekCount++;
+            Position = Math.Max(0, seekResult);
+            return seekResult;
+        }
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default
+        )
+        {
+            int count = await base.ReadAsync(buffer, cancellationToken);
+            BytesRead += count;
+            return count;
         }
     }
 }

@@ -75,7 +75,7 @@ public sealed class ParallelHttpConnectionsTests
                 Root = root,
                 FetchWorkers = 4,
                 BulkHydrationConcurrency = 4,
-                Container = new ZipContainer(token => OpenArchive(SharedClient, archiveUrl, token)),
+                Container = ZipContainer.FromHttp(SharedClient, archiveUrl),
             }
         );
         bool registered = false;

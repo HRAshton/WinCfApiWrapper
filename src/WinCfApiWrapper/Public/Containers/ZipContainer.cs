@@ -39,6 +39,30 @@ public sealed class ZipContainer(
     public ZipContainer(Func<CancellationToken, Stream> openArchive, ArchiveResourceLimits? limits)
         : this(openArchive, limits, true) { }
 
+    /// <summary>Creates a container that reads bounded HTTP byte ranges without downloading the archive.</summary>
+    /// <param name="client">A caller-owned client with automatic decompression disabled.</param>
+    /// <param name="uri">The archive URL; the server must support ranges and version validators.</param>
+    /// <param name="limits">Optional archive resource limits.</param>
+    /// <param name="validateEntryMetadata">Whether to reread the selected central record; disable only for immutable sources.</param>
+    /// <returns>A ZIP container backed by independent range streams.</returns>
+    /// <remarks>
+    /// One initial probe pins the archive length and validator for every stream in this container.
+    /// All requests use SendAsync and honor the client's default HTTP version and version policy.
+    /// Prefer a strong ETag: Last-Modified cannot detect replacements within its timestamp precision.
+    /// </remarks>
+    public static ZipContainer FromHttp(
+        HttpClient client,
+        Uri uri,
+        ArchiveResourceLimits? limits = null,
+        bool validateEntryMetadata = true
+    )
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(uri);
+        var source = new HttpArchiveSource(client, uri);
+        return new ZipContainer(source.OpenRead, limits, validateEntryMetadata);
+    }
+
     /// <inheritdoc />
     public async ValueTask<IReadOnlyCollection<ContainerEntry>> GetEntriesAsync(
         CancellationToken cancellationToken = default
@@ -101,8 +125,13 @@ public sealed class ZipContainer(
 
         ZipEntryInfo expectedEntry = expected!;
 
-        var reader = new ZipEntryReader(ZipDirectory.OpenEntry(
-            _source.OpenRead(cancellationToken), expectedEntry, validateEntryMetadata));
+        var reader = new ZipEntryReader(
+            ZipDirectory.OpenEntry(
+                _source.OpenRead(cancellationToken),
+                expectedEntry,
+                validateEntryMetadata
+            )
+        );
         try
         {
             Stream stream = reader.OpenEntry(expectedEntry);

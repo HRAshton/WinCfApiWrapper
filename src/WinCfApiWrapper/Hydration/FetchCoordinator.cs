@@ -277,6 +277,16 @@ internal sealed class FetchCoordinator : IAsyncDisposable
             throw new InvalidDataException("Container returned a stream that cannot be read.");
         byte[] buffer = new byte[NativeTransfer.BufferSize];
         long skipped = 0;
+        if (input.CanSeek)
+        {
+            // On .NET 8, a sliced MemoryStream can return a backing-buffer
+            // offset from Seek. Position is relative to the stream itself.
+            input.Seek(start, SeekOrigin.Begin);
+            skipped = input.Position;
+            if (skipped < 0 || skipped > start)
+                throw new IOException("Container stream sought outside the requested prefix.");
+        }
+
         while (skipped < start)
         {
             int take = (int)Math.Min(buffer.Length, start - skipped);
