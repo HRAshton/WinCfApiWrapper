@@ -45,11 +45,22 @@ public sealed class ZipContainer(
     /// <param name="limits">Optional archive resource limits.</param>
     /// <param name="validateEntryMetadata">Whether to reread the selected central record; disable only for immutable sources.</param>
     /// <returns>A ZIP container backed by independent range streams.</returns>
-    public static ZipContainer FromHttp(HttpClient client, Uri uri, ArchiveResourceLimits? limits = null, bool validateEntryMetadata = true)
+    /// <remarks>
+    /// One initial probe pins the archive length and validator for every stream in this container.
+    /// All requests use SendAsync and honor the client's default HTTP version and version policy.
+    /// Prefer a strong ETag: Last-Modified cannot detect replacements within its timestamp precision.
+    /// </remarks>
+    public static ZipContainer FromHttp(
+        HttpClient client,
+        Uri uri,
+        ArchiveResourceLimits? limits = null,
+        bool validateEntryMetadata = true
+    )
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(uri);
-        return new ZipContainer(token => new HttpRangeStream(client, uri, token), limits, validateEntryMetadata);
+        var source = new HttpArchiveSource(client, uri);
+        return new ZipContainer(source.OpenRead, limits, validateEntryMetadata);
     }
 
     /// <inheritdoc />
@@ -114,8 +125,13 @@ public sealed class ZipContainer(
 
         ZipEntryInfo expectedEntry = expected!;
 
-        var reader = new ZipEntryReader(ZipDirectory.OpenEntry(
-            _source.OpenRead(cancellationToken), expectedEntry, validateEntryMetadata));
+        var reader = new ZipEntryReader(
+            ZipDirectory.OpenEntry(
+                _source.OpenRead(cancellationToken),
+                expectedEntry,
+                validateEntryMetadata
+            )
+        );
         try
         {
             Stream stream = reader.OpenEntry(expectedEntry);

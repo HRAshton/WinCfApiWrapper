@@ -1,89 +1,87 @@
 using System.Buffers;
-using System.Net;
-using System.Net.Http.Headers;
 
 namespace WinCfApiWrapper.Archives;
 
-// Requests only the bytes consumed by ZipArchive. Never accepts a server fallback
-// to a full response, and pins subsequent requests to the first response's version.
-internal sealed class HttpRangeStream : Stream
+// Each cursor streams bounded ranges from its container's pinned HTTP snapshot.
+internal sealed class HttpRangeStream(
+    HttpArchiveSource source,
+    HttpArchiveSource.Snapshot snapshot,
+    CancellationToken token
+) : Stream
 {
-    private readonly HttpClient _client;
-    private readonly Uri _uri;
-    private readonly CancellationToken _token;
-    private readonly EntityTagHeaderValue? _etag;
-    private readonly DateTimeOffset? _modified;
-    private readonly long _length;
     private long _position;
     private bool _disposed;
-
-    public HttpRangeStream(HttpClient client, Uri uri, CancellationToken token)
-    {
-        _client = client;
-        _uri = uri;
-        _token = token;
-        using HttpResponseMessage response = Send(0, 0, token);
-        _length = response.Content.Headers.ContentRange?.Length
-            ?? throw new IOException("The server did not supply the archive length.");
-        _etag = response.Headers.ETag is { IsWeak: false } etag ? etag : null;
-        _modified = response.Content.Headers.LastModified;
-        if (_etag is null && _modified is null)
-            throw new IOException("Remote archives require a strong ETag or Last-Modified validator.");
-    }
 
     public override bool CanRead => !_disposed;
     public override bool CanSeek => !_disposed;
     public override bool CanWrite => false;
-    public override long Length => _length;
+    public override long Length => snapshot.Length;
 
     public override long Position
     {
         get => _position;
-        set => _position = value >= 0 ? value : throw new ArgumentOutOfRangeException(nameof(value));
+        set =>
+            _position = value >= 0 ? value : throw new ArgumentOutOfRangeException(nameof(value));
     }
 
-    public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+    public override int Read(byte[] buffer, int offset, int count) =>
+        ReadSynchronously(buffer.AsMemory(offset, count));
 
     public override int Read(Span<byte> buffer)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        _token.ThrowIfCancellationRequested();
-        int size = (int)Math.Min(Math.Min(buffer.Length, 64 * 1024), Math.Max(0, Length - Position));
+        token.ThrowIfCancellationRequested();
+        int size = (int)
+            Math.Min(Math.Min(buffer.Length, 64 * 1024), Math.Max(0, Length - Position));
         if (size == 0)
             return 0;
-        using HttpResponseMessage response = Send(Position, Position + size - 1, _token);
-        using Stream body = response.Content.ReadAsStream(_token);
         byte[] rented = ArrayPool<byte>.Shared.Rent(size);
         try
         {
-            body.ReadExactlyAsync(rented.AsMemory(0, size), _token).AsTask().GetAwaiter().GetResult();
-            rented.AsSpan(0, size).CopyTo(buffer);
+            int read = ReadSynchronously(rented.AsMemory(0, size));
+            rented.AsSpan(0, read).CopyTo(buffer);
+            return read;
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(rented);
         }
-
-        Position += size;
-        return size;
     }
 
-    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    public override async ValueTask<int> ReadAsync(
+        Memory<byte> buffer,
+        CancellationToken cancellationToken = default
+    )
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_token, cancellationToken);
-        linked.Token.ThrowIfCancellationRequested();
-        int size = (int)Math.Min(Math.Min(buffer.Length, 64 * 1024), Math.Max(0, Length - Position));
+        using var linked =
+            token.CanBeCanceled && cancellationToken.CanBeCanceled && token != cancellationToken
+                ? CancellationTokenSource.CreateLinkedTokenSource(token, cancellationToken)
+                : null;
+        CancellationToken readToken =
+            linked?.Token ?? (cancellationToken.CanBeCanceled ? cancellationToken : token);
+        readToken.ThrowIfCancellationRequested();
+        int size = (int)
+            Math.Min(Math.Min(buffer.Length, 64 * 1024), Math.Max(0, Length - Position));
         if (size == 0)
             return 0;
-        using var request = CreateRequest(Position, Position + size - 1);
-        using HttpResponseMessage response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token).ConfigureAwait(false);
-        Validate(response, Position, Position + size - 1);
-        await using Stream body = await response.Content.ReadAsStreamAsync(linked.Token).ConfigureAwait(false);
-        await body.ReadExactlyAsync(buffer[..size], linked.Token).ConfigureAwait(false);
+        using HttpResponseMessage response = await source
+            .SendAsync(Position, Position + size - 1, snapshot, readToken)
+            .ConfigureAwait(false);
+        await using Stream body = await response
+            .Content.ReadAsStreamAsync(readToken)
+            .ConfigureAwait(false);
+        await body.ReadExactlyAsync(buffer[..size], readToken).ConfigureAwait(false);
         Position += size;
         return size;
     }
+
+    public override Task<int> ReadAsync(
+        byte[] buffer,
+        int offset,
+        int count,
+        CancellationToken cancellationToken
+    ) => ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
     public override long Seek(long offset, SeekOrigin origin)
     {
@@ -101,7 +99,8 @@ internal sealed class HttpRangeStream : Stream
 
     public override void SetLength(long value) => throw new NotSupportedException();
 
-    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) =>
+        throw new NotSupportedException();
 
     protected override void Dispose(bool disposing)
     {
@@ -109,44 +108,13 @@ internal sealed class HttpRangeStream : Stream
         base.Dispose(disposing);
     }
 
-    private HttpRequestMessage CreateRequest(long start, long end)
+    private int ReadSynchronously(Memory<byte> buffer)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, _uri);
-        request.Headers.Range = new RangeHeaderValue(start, end);
-        request.Headers.AcceptEncoding.ParseAdd("identity");
-        if (_etag is not null)
-            request.Headers.IfRange = new RangeConditionHeaderValue(_etag);
-        else if (_modified is { } modified)
-            request.Headers.IfRange = new RangeConditionHeaderValue(modified);
-        return request;
-    }
-
-    private HttpResponseMessage Send(long start, long end, CancellationToken token)
-    {
-        using var request = CreateRequest(start, end);
-        HttpResponseMessage response = _client.Send(request, HttpCompletionOption.ResponseHeadersRead, token);
-        try
-        {
-            Validate(response, start, end);
-            return response;
-        }
-        catch
-        {
-            response.Dispose();
-            throw;
-        }
-    }
-
-    private void Validate(HttpResponseMessage response, long start, long end)
-    {
-        ContentRangeHeaderValue? range = response.Content.Headers.ContentRange;
-        if (response.StatusCode != HttpStatusCode.PartialContent
-            || range?.Unit != "bytes" || range.From != start || range.To != end
-            || range.Length is null || range.Length <= end
-            || (_length != 0 && range.Length != _length)
-            || response.Content.Headers.ContentEncoding.Any(encoding => encoding != "identity")
-            || (_etag is not null && !_etag.Equals(response.Headers.ETag))
-            || (_etag is null && _modified is not null && response.Content.Headers.LastModified != _modified))
-            throw new IOException("Server returned an invalid range or the remote archive changed.");
+        if (
+            SynchronizationContext.Current is null
+            && TaskScheduler.Current == TaskScheduler.Default
+        )
+            return ReadAsync(buffer).AsTask().GetAwaiter().GetResult();
+        return Task.Run(() => ReadAsync(buffer).AsTask()).GetAwaiter().GetResult();
     }
 }
