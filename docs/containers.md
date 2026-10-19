@@ -16,15 +16,27 @@ For example, `new TarGZipContainer(openArchive, new ArchiveResourceLimits { MaxE
 
 ### Remote ZIP access
 
+Using the `ICloudMountFactory` from the [quick start](../README.md#quick-start):
+
 ```csharp
-using var client = new HttpClient(new SocketsHttpHandler
-{
-    AutomaticDecompression = System.Net.DecompressionMethods.None,
-});
+using var client = new HttpClient(
+    new SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.None }
+);
 var container = ZipContainer.FromHttp(client, new Uri("https://example.com/content.zip"));
+
+await using (
+    ICloudMount mount = factory.Open(
+        new CloudMountOptions { Container = container, Root = @"C:\Cloud\RemoteZip" }
+    )
+)
+{
+    await mount.MountAsync();
+    Console.WriteLine($"Mounted at {mount.Root}. Press Enter to unmount.");
+    Console.ReadLine();
+} // The mount is disposed before the client leaves its enclosing scope.
 ```
 
-Keep the caller-owned client alive for the lifetime of the mount. The server must return exact `206 Partial Content` responses with `Content-Range` and a strong ETag or Last-Modified validator. Requests use `If-Range`; changed versions, encoded responses, and full-download fallbacks fail rather than silently downloading the archive. Reads request at most 64 KiB and do not round small files to 1 MiB blocks.
+Keep the caller-owned client alive for the lifetime of the mount. Perform all mounted-file access inside the mount's `await using` block; do not return the container or mount from a scope that disposes its client. The server must return exact `206 Partial Content` responses with `Content-Range` and a strong ETag or Last-Modified validator. Requests use `If-Range`; changed versions, encoded responses, and full-download fallbacks fail rather than silently downloading the archive. Reads request at most 64 KiB and do not round small files to 1 MiB blocks.
 
 One initial probe pins the length and validator for the container's lifetime; opening files reuses that snapshot without probing again. Create a new container to read a replacement archive. Prefer strong ETags: the Last-Modified fallback cannot distinguish changes within the timestamp's precision. Disabling entry metadata validation does not disable HTTP range and archive-validator checks.
 
