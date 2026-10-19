@@ -47,6 +47,8 @@ CFAPI callback -> FetchCoordinator -> IContentContainer.OpenReadAsync
 
 The mount path appends `.rzm-` followed by the first eight lowercase hexadecimal characters of the content-list SHA-256 fingerprint to the requested base path. This 32-bit prefix can collide between different listings. A previously registered mount can be resumed only if its expected directories/placeholders remain valid. The fingerprint is derived from declared metadata, not from a cryptographic verification of every file's current contents; unchanged upstream content during the mount's lifetime is a caller responsibility.
 
+For controlled immutable sources, `TrustedContentId` substitutes a caller-assigned eight-digit hexadecimal identity for the listing hash. `SkipResumeValidation` additionally skips per-placeholder validation and requires that explicit identity. The caller then guarantees unchanged contents and local placeholders; source and directory enumeration still occur. Reuse an indexed container to avoid archive access on resume.
+
 Root cleanup is intentionally destructive. Only provide dedicated application-owned folders to `CleanupMounts`; never a directory shared with user data. Read [security-model.md](security-model.md) before mounting third-party data or integrating remote sources.
 
 Call `ISyncRootManager.Unregister(mount.Root)` after disposing the mount to unregister and delete its folder. At application startup, `ISyncRootManager.CleanupMounts(parentFolder)` removes recognized mount folders directly under a dedicated application-owned parent and returns the count removed. Never pass a volume root or a folder containing user data; partial cleanup failures are reported as an `AggregateException`.

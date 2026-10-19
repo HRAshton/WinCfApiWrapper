@@ -12,7 +12,7 @@ internal sealed class ContainerCatalog
         StringComparer.OrdinalIgnoreCase
     );
 
-    public ContainerCatalog(IEnumerable<ContainerEntry> entries)
+    public ContainerCatalog(IEnumerable<ContainerEntry> entries, string? trustedContentId = null)
     {
         ArgumentNullException.ThrowIfNull(entries);
         foreach (ContainerEntry? entry in entries)
@@ -64,6 +64,23 @@ internal sealed class ContainerCatalog
                     $"Container path is both a file and directory: {file}"
                 );
             }
+        }
+
+        if (trustedContentId is not null)
+        {
+            if (
+                trustedContentId.Length != 8
+                || trustedContentId.AsSpan().IndexOfAnyExcept("0123456789ABCDEFabcdef") >= 0
+            )
+            {
+                throw new ArgumentException(
+                    "Trusted content ID must contain eight hexadecimal digits.",
+                    nameof(trustedContentId)
+                );
+            }
+
+            Fingerprint = trustedContentId;
+            return;
         }
 
         StringBuilder manifest = new();
