@@ -6,6 +6,15 @@ namespace WinCfApiWrapper.Tests.Archives;
 
 public sealed class ZipCatalogTests
 {
+    [Fact]
+    public void Constructor_NullSource_ThrowsArgumentNullException()
+    {
+        ArgumentNullException error = Assert.Throws<ArgumentNullException>(() =>
+            new ZipCatalog(null!, maxEntries: 1));
+
+        Assert.Equal("stream", error.ParamName);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -30,6 +39,7 @@ public sealed class ZipCatalogTests
         Assert.Contains(@"dir\nested", catalog.Directories);
         Assert.Equal(2, catalog.Entries.Count);
         Assert.Equal(64, catalog.Fingerprint.Length);
+        Assert.Same(catalog.Fingerprint, catalog.Fingerprint);
     }
 
     [Fact]

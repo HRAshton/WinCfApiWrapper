@@ -13,17 +13,21 @@ internal sealed class ZipCatalog
         StringComparer.OrdinalIgnoreCase
     );
 
+    private string? _fingerprint;
+
     public ZipCatalog(Stream stream, int maxEntries)
     {
-        using Stream ownedStream = stream ?? throw new ArgumentNullException(nameof(stream));
+        using Stream ownedStream = new BufferedStream(stream ?? throw new ArgumentNullException(nameof(stream)), 64 * 1024);
         if (maxEntries <= 0)
             throw new ArgumentOutOfRangeException(nameof(maxEntries));
         using var archive = new ZipArchive(ownedStream, ZipArchiveMode.Read, true);
+        var directoryReader = new ZipDirectory(ownedStream);
         int count = 0;
         foreach (ZipArchiveEntry entry in archive.Entries)
         {
             if (++count > maxEntries)
                 throw new InvalidDataException("ZIP archive exceeds maximum entry count.");
+            (long offset, byte[] record) = directoryReader.ReadEntry();
             bool isDirectory = entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\');
             string name = ContainerPath.Normalize(entry.FullName);
             if (name.Length == 0)
@@ -44,6 +48,11 @@ internal sealed class ZipCatalog
                         entry.CompressedLength,
                         entry.Crc32
                     )
+                    {
+                        ArchiveLength = ownedStream.Length,
+                        DirectoryOffset = offset,
+                        DirectoryRecord = record,
+                    }
                 );
                 if (isDuplicate)
                     throw new InvalidDataException($"Duplicate ZIP path: {name}");
@@ -62,7 +71,21 @@ internal sealed class ZipCatalog
             if (_directories.Contains(file))
                 throw new InvalidDataException($"ZIP path is both a file and directory: {file}");
         }
+    }
 
+    public IReadOnlyDictionary<string, ZipEntryInfo> Entries => _entries;
+
+    public IReadOnlyCollection<string> Directories => _directories;
+
+    public string Fingerprint => _fingerprint ??= ComputeFingerprint();
+
+    public bool Contains(string path)
+    {
+        return _entries.ContainsKey(ContainerPath.Normalize(path));
+    }
+
+    private string ComputeFingerprint()
+    {
         StringBuilder manifest = new();
         foreach (string directory in _directories.OrderBy(name => name, StringComparer.Ordinal))
             manifest.Append('D').Append('\0').Append(directory).Append('\n');
@@ -84,19 +107,8 @@ internal sealed class ZipCatalog
                 .Append('\n');
         }
 
-        Fingerprint = Convert.ToHexString(
+        return Convert.ToHexString(
             SHA256.HashData(Encoding.UTF8.GetBytes(manifest.ToString()))
         );
-    }
-
-    public IReadOnlyDictionary<string, ZipEntryInfo> Entries => _entries;
-
-    public IReadOnlyCollection<string> Directories => _directories;
-
-    public string Fingerprint { get; }
-
-    public bool Contains(string path)
-    {
-        return _entries.ContainsKey(ContainerPath.Normalize(path));
     }
 }

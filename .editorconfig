@@ -26,6 +26,7 @@ dotnet_diagnostic.CA1309.severity = warning # CA1309: Use ordinal string compari
 dotnet_diagnostic.SA1009.severity = none # SA1009: Closing parenthesis should not be preceded by a space.
 dotnet_diagnostic.SA1111.severity = none # SA1111: Closing parenthesis should be on line of last parameter.
 dotnet_diagnostic.SA1502.severity = none # SA1502: Element should not be on a single line.
+dotnet_diagnostic.SA1504.severity = none # CSharpier may wrap one expression accessor while keeping the other on one line.
 
 # Keep the established field-first ordering, implicit instance calls, and _field names.
 dotnet_diagnostic.SA1101.severity = none # SA1101: Prefix local calls with this.

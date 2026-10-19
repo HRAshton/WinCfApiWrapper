@@ -12,6 +12,49 @@ namespace WinCfApiWrapper.IntegrationTests;
 public sealed class HydrationTests
 {
     [Fact]
+    public async Task HydratedFile_ReadAndHydrateAgain_DoNotOpenArchive()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        string root = FixtureArchive.Root();
+        int opens = 0;
+        bool unavailable = false;
+        var container = new ZipContainer(_ =>
+        {
+            Interlocked.Increment(ref opens);
+            if (unavailable)
+                throw new IOException("Archive is offline.");
+            return File.OpenRead(FixtureArchive.LocalPath);
+        });
+        var options = new CloudMountOptions { Container = container, Root = root };
+        bool registered = false;
+        try
+        {
+            await using (var mount = new CloudMount(options))
+            {
+                await mount.MountAsync(token);
+                registered = true;
+                await mount.HydrateAsync("docs/hello.txt", token);
+                int afterHydration = opens;
+                unavailable = true;
+                await mount.HydrateAsync("docs/hello.txt", token);
+                Assert.Equal("Hello from a checked-in ZIP fixture!\n", await File.ReadAllTextAsync(mount.Resolve("docs/hello.txt"), token));
+                Assert.Equal(afterHydration, opens);
+            }
+
+            int beforeResume = opens;
+            await using var resumed = new CloudMount(options);
+            await resumed.MountAsync(token);
+            Assert.Equal("Hello from a checked-in ZIP fixture!\n", await File.ReadAllTextAsync(resumed.Resolve("docs/hello.txt"), token));
+            Assert.Equal(beforeResume, opens);
+        }
+        finally
+        {
+            if (registered)
+                FixtureArchive.CleanupRoot(root);
+        }
+    }
+
+    [Fact]
     public async Task HydrateAllAsync_AllFilesBecomeReadable()
     {
         CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
