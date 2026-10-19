@@ -9,6 +9,128 @@ namespace WinCfApiWrapper.Tests.Archives;
 
 public sealed class ZipDirectoryTests
 {
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public async Task EntryDataBeyondOriginalArchive_IsRejectedBeforeOpening(
+        bool extendLocalHeader,
+        bool validate
+    )
+    {
+        byte[] archive = BuildArchive(CompressionLevel.NoCompression);
+        if (extendLocalHeader)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                archive.AsSpan(26),
+                (ushort)(archive.Length + 16 - 30)
+            );
+        }
+        else
+        {
+            int central = (int)CentralOffset(archive);
+            int dataStart = 30 + BinaryPrimitives.ReadUInt16LittleEndian(archive.AsSpan(26));
+            uint length = (uint)(archive.Length - dataStart + 32);
+            BinaryPrimitives.WriteUInt32LittleEndian(archive.AsSpan(central + 20), length);
+            BinaryPrimitives.WriteUInt32LittleEndian(archive.AsSpan(central + 24), length);
+        }
+
+        using (var baseline = new ZipArchive(new MemoryStream(archive), ZipArchiveMode.Read))
+            Assert.Throws<InvalidDataException>(() => baseline.Entries.Single().Open());
+
+        MemoryStream? openedSource = null;
+        var container = new ZipContainer(
+            _ => openedSource = new MemoryStream(archive),
+            null,
+            validate
+        );
+        CancellationToken token = TestContext.Current.CancellationToken;
+        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync(token));
+
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await container.OpenReadAsync(entry, token)
+        );
+
+        Assert.NotNull(openedSource);
+        Assert.False(openedSource.CanRead);
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(false, 32)]
+    [InlineData(true, 0)]
+    [InlineData(true, 32)]
+    public async Task TrailingBytes_MatchZipArchiveCompatibility(bool zip64, int commentLength)
+    {
+        byte[] original = zip64 ? BuildZip64Archive() : BuildArchive();
+        byte[] archive = new byte[original.Length + commentLength + 16];
+        original.CopyTo(archive, 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            archive.AsSpan(original.Length - 2),
+            (ushort)commentLength
+        );
+        archive.AsSpan(original.Length).Fill(0x7e);
+        string expected;
+        using (var baseline = new ZipArchive(new MemoryStream(archive), ZipArchiveMode.Read))
+        using (var reader = new StreamReader(baseline.Entries.Single().Open()))
+            expected = reader.ReadToEnd();
+
+        var container = new ZipContainer(_ => new MemoryStream(archive));
+        CancellationToken token = TestContext.Current.CancellationToken;
+        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync(token));
+        await using Stream input = await container.OpenReadAsync(entry, token);
+        using var contents = new StreamReader(input);
+
+        Assert.Equal("payload", expected);
+        Assert.Equal(expected, await contents.ReadToEndAsync(token));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task EntryValidation_ReusesNativeHeaderReads_WithoutFetchingOtherDirectoryRecords(
+        bool validate
+    )
+    {
+        byte[] payload = new byte[10 * 1024];
+        new Random(17).NextBytes(payload);
+        using var output = new MemoryStream();
+        using (var writer = new ZipArchive(output, ZipArchiveMode.Create, true))
+        {
+            using (
+                Stream file = writer.CreateEntry("file.txt", CompressionLevel.NoCompression).Open()
+            )
+                file.Write(payload);
+            for (int i = 0; i < 100; i++)
+                writer.CreateEntry($"other-{i}.txt");
+        }
+
+        byte[] archive = output.ToArray();
+        CancellationToken token = TestContext.Current.CancellationToken;
+        using var baselineSource = new ReadTrackingStream(archive);
+        using var baseline = new ZipArchive(baselineSource, ZipArchiveMode.Read, true);
+        ZipArchiveEntry baselineEntry = baseline.GetEntry("file.txt")!;
+        baselineSource.ResetCounts();
+        using (Stream input = baselineEntry.Open())
+            await input.CopyToAsync(Stream.Null, token);
+
+        var catalog = new ZipCatalog(new MemoryStream(archive), maxEntries: 101);
+        ZipEntryInfo expected = catalog.Entries["file.txt"];
+        using var source = new ReadTrackingStream(archive);
+        using var reader = new ZipEntryReader(ZipDirectory.OpenEntry(source, expected, validate));
+        await using Stream contents = reader.OpenEntry(expected);
+        using var actual = new MemoryStream();
+        await contents.CopyToAsync(actual, token);
+
+        Assert.Equal(payload, actual.ToArray());
+        Assert.Equal(
+            baselineSource.BytesRead + (validate ? expected.DirectoryRecord!.Length : 0),
+            source.BytesRead
+        );
+        Assert.Equal(baselineSource.ReadCalls + (validate ? 1 : 0), source.ReadCalls);
+    }
+
     [Fact]
     public async Task Zip64Directory_SmallArchiveWithSentinelOffsets_IndexesAndReadsContent()
     {
@@ -31,7 +153,9 @@ public sealed class ZipDirectoryTests
     {
         using var source = new MemoryStream(new byte[length]);
 
-        InvalidDataException error = Assert.Throws<InvalidDataException>(() => new ZipDirectory(source));
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() =>
+            new ZipDirectory(source)
+        );
 
         Assert.Equal("ZIP end record is missing.", error.Message);
     }
@@ -62,7 +186,9 @@ public sealed class ZipDirectoryTests
         archive[signature] = 0;
         using var source = new MemoryStream(archive);
 
-        InvalidDataException error = Assert.Throws<InvalidDataException>(() => new ZipDirectory(source));
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() =>
+            new ZipDirectory(source)
+        );
 
         Assert.Equal(expectedMessage, error.Message);
     }
@@ -75,7 +201,9 @@ public sealed class ZipDirectoryTests
         using var source = new MemoryStream(archive);
         var directory = new ZipDirectory(source);
 
-        InvalidDataException error = Assert.Throws<InvalidDataException>(() => directory.ReadEntry());
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() =>
+            directory.ReadEntry()
+        );
 
         Assert.Equal("ZIP central record is missing.", error.Message);
     }
@@ -85,7 +213,10 @@ public sealed class ZipDirectoryTests
     [InlineData(16, true)]
     [InlineData(8, false)]
     [InlineData(16, false)]
-    public async Task ChangedCentralMetadata_IsRejectedUnlessValidationIsDisabled(int fieldOffset, bool validate)
+    public async Task ChangedCentralMetadata_IsRejectedUnlessValidationIsDisabled(
+        int fieldOffset,
+        bool validate
+    )
     {
         byte[] original = BuildArchive();
         byte[] changed = (byte[])original.Clone();
@@ -95,14 +226,16 @@ public sealed class ZipDirectoryTests
         var container = new ZipContainer(
             _ => openedSource = new MemoryStream(opens++ == 0 ? original : changed),
             limits: null,
-            validateEntryMetadata: validate);
+            validateEntryMetadata: validate
+        );
         CancellationToken token = TestContext.Current.CancellationToken;
         ContainerEntry entry = Assert.Single(await container.GetEntriesAsync(token));
 
         if (validate)
         {
             IOException error = await Assert.ThrowsAsync<IOException>(async () =>
-                await container.OpenReadAsync(entry, token));
+                await container.OpenReadAsync(entry, token)
+            );
             Assert.Contains("Archive entry changed", error.Message);
         }
         else
@@ -172,7 +305,8 @@ public sealed class ZipDirectoryTests
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await view.ReadExactlyAsync(bytes.AsMemory(), canceled.Token));
+            await view.ReadExactlyAsync(bytes.AsMemory(), canceled.Token)
+        );
     }
 
     private static ZipEntryInfo SnapshotEntry(byte[] archive)
@@ -186,11 +320,13 @@ public sealed class ZipDirectoryTests
         return BinaryPrimitives.ReadUInt32LittleEndian(archive.AsSpan(archive.Length - 6));
     }
 
-    private static byte[] BuildArchive()
+    private static byte[] BuildArchive(CompressionLevel compressionLevel = CompressionLevel.Optimal)
     {
         using var output = new MemoryStream();
         using (var archive = new ZipArchive(output, ZipArchiveMode.Create, true))
-        using (var writer = new StreamWriter(archive.CreateEntry("file.txt").Open()))
+        using (
+            var writer = new StreamWriter(archive.CreateEntry("file.txt", compressionLevel).Open())
+        )
             writer.Write("payload");
         return output.ToArray();
     }
@@ -227,5 +363,39 @@ public sealed class ZipDirectoryTests
         BinaryPrimitives.WriteUInt32LittleEndian(end.AsSpan(16), uint.MaxValue);
         writer.Write(end);
         return output.ToArray();
+    }
+
+    private sealed class ReadTrackingStream(byte[] bytes) : MemoryStream(bytes)
+    {
+        public long BytesRead { get; private set; }
+
+        public int ReadCalls { get; private set; }
+
+        public void ResetCounts()
+        {
+            BytesRead = 0;
+            ReadCalls = 0;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            int read = base.Read(buffer, offset, count);
+            if (read > 0)
+            {
+                BytesRead += read;
+                ReadCalls++;
+            }
+
+            return read;
+        }
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default
+        )
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(Read(buffer.Span));
+        }
     }
 }

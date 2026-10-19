@@ -14,6 +14,8 @@ For example, `new TarGZipContainer(openArchive, new ArchiveResourceLimits { MaxE
 
 The directory is indexed once per container instance. Each subsequent file open uses its cached central record and validates just that record against the source; other directory records are not fetched or parsed. The source factory still runs for each open, so it must provide efficient seeking rather than eagerly downloading all bytes. Entries remain decoded by .NET `ZipArchive`, including ZIP64 entries.
 
+ZIP discovery accepts trailing bytes after the archive comment, matching .NET `ZipArchive` within its bounded end-record search. Cached directory bytes are available only during directory parsing; entry opening and data reads use the original archive bounds. These bounds remain enforced when metadata consistency checks are disabled, without additional source reads.
+
 For a controlled immutable source, `new ZipContainer(openArchive, limits: null, validateEntryMetadata: false)` skips rereading the selected central record. Snapshot membership, archive length, safe paths, and .NET ZIP format checks remain enforced. This option does not make an arbitrary mutable source safe.
 
 ## `IContentContainer` contract

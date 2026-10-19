@@ -18,8 +18,8 @@ internal sealed class ZipDirectory
         int end = tail.Length - 22;
         while (end >= 0)
         {
-            if (BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan(end)) == 0x06054b50
-                && end + 22 + BinaryPrimitives.ReadUInt16LittleEndian(tail.AsSpan(end + 20)) == tail.Length)
+            // Match ZipArchive's backward signature search, including trailing bytes after the comment.
+            if (BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan(end)) == 0x06054b50)
                 break;
             end--;
         }
@@ -35,7 +35,9 @@ internal sealed class ZipDirectory
             source.ReadExactly(record);
             if (BinaryPrimitives.ReadUInt32LittleEndian(record) != 0x07064b50)
                 throw new InvalidDataException("ZIP64 locator is missing.");
-            source.Position = checked((long)BinaryPrimitives.ReadUInt64LittleEndian(record.AsSpan(8)));
+            source.Position = checked(
+                (long)BinaryPrimitives.ReadUInt64LittleEndian(record.AsSpan(8))
+            );
             record = new byte[56];
             source.ReadExactly(record);
             if (BinaryPrimitives.ReadUInt32LittleEndian(record) != 0x06064b50)
@@ -51,7 +53,8 @@ internal sealed class ZipDirectory
         _source.ReadExactly(header);
         if (BinaryPrimitives.ReadUInt32LittleEndian(header) != 0x02014b50)
             throw new InvalidDataException("ZIP central record is missing.");
-        int size = 46
+        int size =
+            46
             + BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(28))
             + BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(30))
             + BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(32));
@@ -78,8 +81,10 @@ internal sealed class ZipDirectory
 
                 // DOS timestamps can vary when a factory regenerates identical ZIP contents.
                 // Content identity still includes names, sizes, CRC, flags, and offsets.
-                if (!actual.AsSpan(0, 12).SequenceEqual(record.AsSpan(0, 12))
-                    || !actual.AsSpan(16).SequenceEqual(record.AsSpan(16)))
+                if (
+                    !actual.AsSpan(0, 12).SequenceEqual(record.AsSpan(0, 12))
+                    || !actual.AsSpan(16).SequenceEqual(record.AsSpan(16))
+                )
                     throw new IOException($"Archive entry changed: {entry.FullName}");
             }
 
@@ -122,8 +127,15 @@ internal sealed class ZipDirectory
         }
     }
 
+    public static void CompleteDirectoryRead(Stream stream)
+    {
+        if (stream is DirectoryStream directory)
+            directory.CompleteDirectoryRead();
+    }
+
     private sealed class DirectoryStream(Stream source, byte[] tail) : Stream
     {
+        private bool _directoryReadComplete;
         private long _position;
 
         public override bool CanRead => true;
@@ -132,15 +144,24 @@ internal sealed class ZipDirectory
 
         public override bool CanWrite => false;
 
-        public override long Length => checked(source.Length + tail.Length);
+        public override long Length =>
+            _directoryReadComplete ? source.Length : checked(source.Length + tail.Length);
 
         public override long Position
         {
             get => _position;
-            set => _position = value >= 0 ? value : throw new ArgumentOutOfRangeException(nameof(value));
+            set =>
+                _position =
+                    value >= 0 ? value : throw new ArgumentOutOfRangeException(nameof(value));
         }
 
-        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+        public override int Read(byte[] buffer, int offset, int count) =>
+            Read(buffer.AsSpan(offset, count));
+
+        public void CompleteDirectoryRead()
+        {
+            _directoryReadComplete = true;
+        }
 
         public override int Read(Span<byte> buffer)
         {
@@ -150,7 +171,9 @@ internal sealed class ZipDirectory
             if (_position < source.Length)
             {
                 source.Position = _position;
-                count = source.Read(buffer[..(int)Math.Min(buffer.Length, source.Length - _position)]);
+                count = source.Read(
+                    buffer[..(int)Math.Min(buffer.Length, source.Length - _position)]
+                );
             }
             else
             {
@@ -162,13 +185,21 @@ internal sealed class ZipDirectory
             return count;
         }
 
-        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default
+        )
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (_position >= source.Length)
                 return Read(buffer.Span);
             source.Position = _position;
-            int count = await source.ReadAsync(buffer[..(int)Math.Min(buffer.Length, source.Length - _position)], cancellationToken).ConfigureAwait(false);
+            int count = await source
+                .ReadAsync(
+                    buffer[..(int)Math.Min(buffer.Length, source.Length - _position)],
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
             _position += count;
             return count;
         }
@@ -189,7 +220,8 @@ internal sealed class ZipDirectory
 
         public override void SetLength(long value) => throw new NotSupportedException();
 
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
 
         protected override void Dispose(bool disposing)
         {

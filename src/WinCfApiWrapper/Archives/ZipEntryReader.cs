@@ -39,6 +39,9 @@ internal sealed class ZipEntryReader : IDisposable
         if (entryChanged)
             throw new IOException($"Archive entry changed: {expected.FullName}");
 
+        // GetEntry has finished reading the synthetic directory. Restore the real
+        // bounds before ZipArchive validates the local header and compressed data.
+        ZipDirectory.CompleteDirectoryRead(_stream);
         return actual.Open();
     }
 }
