@@ -279,8 +279,9 @@ internal sealed class FetchCoordinator : IAsyncDisposable
         long skipped = 0;
         if (input.CanSeek)
         {
-            input.Seek(start, SeekOrigin.Begin);
-            skipped = start;
+            skipped = input.Seek(start, SeekOrigin.Begin);
+            if (skipped < 0 || skipped > start)
+                throw new IOException("Container stream sought outside the requested prefix.");
         }
 
         while (skipped < start)

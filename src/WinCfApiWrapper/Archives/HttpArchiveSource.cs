@@ -66,13 +66,16 @@ internal sealed class HttpArchiveSource(HttpClient client, Uri uri)
         ContentRangeHeaderValue? range = response.Content.Headers.ContentRange;
         if (
             response.StatusCode != HttpStatusCode.PartialContent
-            || range?.Unit != "bytes"
+            || range is null
+            || !range.Unit.Equals("bytes", StringComparison.OrdinalIgnoreCase)
             || range.From != start
             || range.To != end
             || range.Length is null
             || range.Length <= end
             || (expected is not null && range.Length != expected.Length)
-            || response.Content.Headers.ContentEncoding.Any(encoding => encoding != "identity")
+            || response.Content.Headers.ContentEncoding.Any(encoding =>
+                !string.Equals(encoding, "identity", StringComparison.OrdinalIgnoreCase)
+            )
             || (expected?.ETag is { } etag && !etag.Equals(response.Headers.ETag))
             || (
                 expected is { ETag: null, Modified: { } modified }

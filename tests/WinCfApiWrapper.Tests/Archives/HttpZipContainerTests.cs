@@ -203,17 +203,22 @@ public sealed class HttpZipContainerTests
         using var handler = new AsyncOnlyRangeHandler(responses);
         using var client = new HttpClient(handler);
         var source = new HttpArchiveSource(client, new Uri("https://archive.test/files.zip"));
+
+        // These callers block on an async probe. Dedicated threads keep this
+        // concurrency test from starving unrelated tests on small CI runners.
         await Task.WhenAll(
             Enumerable
                 .Range(0, 12)
                 .Select(_ =>
-                    Task.Run(
+                    Task.Factory.StartNew(
                         () =>
                         {
                             using Stream input = source.OpenRead(default);
                             Assert.Equal(responses.Archive.Length, input.Length);
                         },
-                        TestContext.Current.CancellationToken
+                        TestContext.Current.CancellationToken,
+                        TaskCreationOptions.LongRunning,
+                        TaskScheduler.Default
                     )
                 )
         );
@@ -305,6 +310,8 @@ public sealed class HttpZipContainerTests
 
     [Theory]
     [InlineData("identity", false)]
+    [InlineData("Identity", false)]
+    [InlineData("IDENTITY", false)]
     [InlineData("gzip", true)]
     public async Task ContentEncoding_IsValidatedOnEveryResponse(string encoding, bool rejected)
     {
@@ -349,9 +356,118 @@ public sealed class HttpZipContainerTests
         Assert.Equal(0, input.Read(buffer));
         Assert.Equal(requests, handler.Ranges.Count);
         Assert.Throws<ArgumentOutOfRangeException>(() => input.Seek(0, (SeekOrigin)123));
+        Assert.Throws<ArgumentOutOfRangeException>(() => input.Position = -1);
         Assert.Throws<NotSupportedException>(() => input.Flush());
         Assert.Throws<NotSupportedException>(() => input.SetLength(0));
         Assert.Throws<NotSupportedException>(() => input.Write(new byte[1], 0, 1));
+    }
+
+    [Theory]
+    [InlineData("Bytes")]
+    [InlineData("BYTES")]
+    public async Task RangeUnits_AreCaseInsensitive(string unit)
+    {
+        using var handler = new RangeHandler(BuildArchive([1, 2, 3], 1))
+        {
+            TransformResponse = response => response.Content.Headers.ContentRange!.Unit = unit,
+        };
+        using var client = new HttpClient(handler);
+        ZipContainer container = ZipContainer.FromHttp(
+            client,
+            new Uri("https://archive.test/files.zip")
+        );
+        CancellationToken token = TestContext.Current.CancellationToken;
+        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync(token));
+        await using Stream input = await container.OpenReadAsync(entry, token);
+        byte[] actual = new byte[3];
+        await input.ReadExactlyAsync(actual, token);
+        Assert.Equal(new byte[] { 1, 2, 3 }, actual);
+    }
+
+    [Theory]
+    [InlineData("missing-range")]
+    [InlineData("wrong-unit")]
+    [InlineData("wrong-start")]
+    [InlineData("wrong-end")]
+    [InlineData("unknown-length")]
+    [InlineData("short-length")]
+    [InlineData("changed-length")]
+    [InlineData("missing-etag")]
+    [InlineData("weak-etag")]
+    [InlineData("missing-date")]
+    public async Task InvalidRangeOrMissingPinnedValidator_FailsBeforeReadingPayload(string failure)
+    {
+        using var handler = new RangeHandler(BuildArchive([1, 2, 3], 1));
+        if (failure == "missing-date")
+        {
+            handler.ETag = null;
+            handler.Modified = new DateTimeOffset(2026, 10, 19, 12, 0, 0, TimeSpan.Zero);
+        }
+
+        using var client = new HttpClient(handler);
+        ZipContainer container = ZipContainer.FromHttp(
+            client,
+            new Uri("https://archive.test/files.zip")
+        );
+        CancellationToken token = TestContext.Current.CancellationToken;
+        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync(token));
+        handler.TransformResponse = response =>
+        {
+            ContentRangeHeaderValue range = response.Content.Headers.ContentRange!;
+            switch (failure)
+            {
+                case "missing-range":
+                    response.Content.Headers.ContentRange = null;
+                    break;
+                case "wrong-unit":
+                    range.Unit = "items";
+                    break;
+                case "wrong-start":
+                    response.Content.Headers.ContentRange = new ContentRangeHeaderValue(
+                        range.From!.Value - 1,
+                        range.To!.Value,
+                        range.Length!.Value
+                    );
+                    break;
+                case "wrong-end":
+                    response.Content.Headers.ContentRange = new ContentRangeHeaderValue(
+                        range.From!.Value,
+                        range.To!.Value + 1,
+                        range.Length!.Value
+                    );
+                    break;
+                case "unknown-length":
+                    response.Content.Headers.ContentRange = new ContentRangeHeaderValue(
+                        range.From!.Value,
+                        range.To!.Value
+                    );
+                    break;
+                case "short-length":
+                    response.Content.Headers.ContentRange = new ContentRangeHeaderValue(
+                        range.To!.Value
+                    );
+                    break;
+                case "changed-length":
+                    response.Content.Headers.ContentRange = new ContentRangeHeaderValue(
+                        range.From!.Value,
+                        range.To!.Value,
+                        range.Length!.Value + 1
+                    );
+                    break;
+                case "missing-etag":
+                    response.Headers.ETag = null;
+                    break;
+                case "weak-etag":
+                    response.Headers.ETag = new EntityTagHeaderValue("\"snapshot\"", true);
+                    break;
+                case "missing-date":
+                    response.Content.Headers.LastModified = null;
+                    break;
+            }
+        };
+        await Assert.ThrowsAsync<IOException>(async () =>
+            await container.OpenReadAsync(entry, token)
+        );
     }
 
     private static byte[] BuildArchive(byte[] payload, int count)
@@ -382,6 +498,8 @@ public sealed class HttpZipContainerTests
         public DateTimeOffset? Modified { get; set; }
 
         public string? ContentEncoding { get; set; }
+
+        public Action<HttpResponseMessage>? TransformResponse { get; set; }
 
         public int ProbeCount => Volatile.Read(ref _probes);
 
@@ -432,6 +550,7 @@ public sealed class HttpZipContainerTests
                 end,
                 current.Length
             );
+            TransformResponse?.Invoke(response);
             return response;
         }
 
