@@ -277,6 +277,12 @@ internal sealed class FetchCoordinator : IAsyncDisposable
             throw new InvalidDataException("Container returned a stream that cannot be read.");
         byte[] buffer = new byte[NativeTransfer.BufferSize];
         long skipped = 0;
+        if (input.CanSeek)
+        {
+            input.Seek(start, SeekOrigin.Begin);
+            skipped = start;
+        }
+
         while (skipped < start)
         {
             int take = (int)Math.Min(buffer.Length, start - skipped);

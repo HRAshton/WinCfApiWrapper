@@ -39,6 +39,19 @@ public sealed class ZipContainer(
     public ZipContainer(Func<CancellationToken, Stream> openArchive, ArchiveResourceLimits? limits)
         : this(openArchive, limits, true) { }
 
+    /// <summary>Creates a container that reads bounded HTTP byte ranges without downloading the archive.</summary>
+    /// <param name="client">A caller-owned client with automatic decompression disabled.</param>
+    /// <param name="uri">The archive URL; the server must support ranges and version validators.</param>
+    /// <param name="limits">Optional archive resource limits.</param>
+    /// <param name="validateEntryMetadata">Whether to reread the selected central record; disable only for immutable sources.</param>
+    /// <returns>A ZIP container backed by independent range streams.</returns>
+    public static ZipContainer FromHttp(HttpClient client, Uri uri, ArchiveResourceLimits? limits = null, bool validateEntryMetadata = true)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(uri);
+        return new ZipContainer(token => new HttpRangeStream(client, uri, token), limits, validateEntryMetadata);
+    }
+
     /// <inheritdoc />
     public async ValueTask<IReadOnlyCollection<ContainerEntry>> GetEntriesAsync(
         CancellationToken cancellationToken = default

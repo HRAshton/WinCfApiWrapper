@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
 
@@ -98,15 +99,18 @@ internal sealed class LoopbackRangeServer : IAsyncDisposable
                     throw new InvalidDataException("Unexpected HTTP request.");
 
                 string? line;
-                bool rangeRequested = false;
+                RangeItemHeaderValue? range = null;
                 while (!string.IsNullOrEmpty(line = await reader.ReadLineAsync(_shutdown.Token)))
                 {
-                    if (line.StartsWith("Range: bytes=0-", StringComparison.OrdinalIgnoreCase))
-                        rangeRequested = true;
+                    if (line.StartsWith("Range: ", StringComparison.OrdinalIgnoreCase))
+                        range = RangeHeaderValue.Parse(line[7..]).Ranges.Single();
                 }
 
-                if (!rangeRequested)
+                if (range?.From is null)
                     throw new InvalidDataException("Archive request did not use a byte range.");
+                long start = range.From.Value;
+                long end = Math.Min(range.To ?? (_archive.Length - 1), _archive.Length - 1);
+                int size = checked((int)(end - start + 1));
 
                 observed = _observe;
                 if (observed)
@@ -130,11 +134,11 @@ internal sealed class LoopbackRangeServer : IAsyncDisposable
                 }
 
                 byte[] headers = Encoding.ASCII.GetBytes(
-                    $"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-{_archive.Length - 1}/{_archive.Length}\r\n"
-                        + $"Content-Length: {_archive.Length}\r\nConnection: close\r\n\r\n"
+                    $"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {start}-{end}/{_archive.Length}\r\n"
+                        + $"Content-Length: {size}\r\nETag: \"fixture\"\r\nConnection: close\r\n\r\n"
                 );
                 await network.WriteAsync(headers, _shutdown.Token);
-                await network.WriteAsync(_archive, _shutdown.Token);
+                await network.WriteAsync(_archive.AsMemory((int)start, size), _shutdown.Token);
             }
             catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
             {
