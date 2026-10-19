@@ -17,6 +17,7 @@ internal sealed class FetchCoordinator : IAsyncDisposable
     private readonly IContentContainer _container;
     private readonly Action<string?, Exception> _onError;
     private readonly Func<ContainerEntry, Stream>? _openEntry;
+    private readonly Action<OperationProgress>? _progress;
 
     // CFAPI can reuse a key while an earlier callback is still completing.
     // Track each callback independently; cancellation applies to every matching key.
@@ -36,7 +37,8 @@ internal sealed class FetchCoordinator : IAsyncDisposable
         int queueCapacity,
         Action<string?, Exception> onError,
         NativeTransfer? transfer = null,
-        Func<ContainerEntry, Stream>? openEntry = null
+        Func<ContainerEntry, Stream>? openEntry = null,
+        Action<OperationProgress>? progress = null
     )
     {
         _catalog = catalog;
@@ -44,6 +46,7 @@ internal sealed class FetchCoordinator : IAsyncDisposable
         _onError = onError;
         _transfer = transfer ?? new NativeTransfer();
         _openEntry = openEntry;
+        _progress = progress;
         _channel = Channel.CreateBounded<FetchRequest>(
             new BoundedChannelOptions(queueCapacity)
             {
@@ -326,6 +329,9 @@ internal sealed class FetchCoordinator : IAsyncDisposable
             }
 
             offset += size;
+            _progress?.Invoke(
+                new OperationProgress("Fetch", offset - start, length, entry.RelativePath)
+            );
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO.Compression;
 using Microsoft.Extensions.Logging;
 using WinCfApiWrapper.Archives;
@@ -49,6 +50,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         bool skipValidation
     )
     {
+        var reports = new List<OperationProgress>();
         var fake = new FakeMountOperations();
         int opens = 0;
         var container = new ZipContainer(_ =>
@@ -62,6 +64,7 @@ public sealed class CloudMountTransactionTests : IDisposable
             Root = BaseRoot,
             TrustedContentId = "1234abcd",
             SkipResumeValidation = skipValidation,
+            Progress = new InlineProgress(reports.Add),
         };
         string firstRoot;
         await using (var first = new CloudMount(options, fake))
@@ -80,6 +83,17 @@ public sealed class CloudMountTransactionTests : IDisposable
 
         Assert.Equal(1, opens);
         Assert.Equal(skipValidation ? 0 : 2, fake.Calls.Count(call => call == "validate"));
+        Assert.Contains(reports, report => report.Stage == "Indexing" && report.Total is null);
+        Assert.Contains(
+            reports,
+            report => report.Stage == "CreatingPlaceholders" && report.Completed == report.Total
+        );
+        Assert.Contains(reports, report => report.Stage == "Mounted");
+        Assert.Contains(
+            reports,
+            report => report.Stage == "Validating" && report.Completed == report.Total
+        );
+        Assert.Equal("Stopped", reports[^1].Stage);
     }
 
     [Fact]
@@ -92,6 +106,75 @@ public sealed class CloudMountTransactionTests : IDisposable
             SkipResumeValidation = true,
         };
         Assert.Throws<ArgumentException>(() => new CloudMount(options, new FakeMountOperations()));
+    }
+
+    [Fact]
+    public async Task SynchronouslyThrowingProgressReport_DoesNotBreakMountOrCleanup()
+    {
+        var options = new CloudMountOptions
+        {
+            Container = new ZipContainer(_ => File.OpenRead(Source)),
+            Root = BaseRoot,
+            Progress = new InlineProgress(_ => throw new InvalidOperationException("UI failed")),
+        };
+        await using var mount = new CloudMount(options, new FakeMountOperations());
+        await mount.MountAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(MountState.Mounted, mount.State);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PostedProgressCallbacks_MustHandleTheirOwnExceptions(bool handleInCallback)
+    {
+        var context = new QueuedProgressContext();
+        var handled = new List<Exception>();
+        SynchronizationContext? previous = SynchronizationContext.Current;
+        Progress<OperationProgress> progress;
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            progress = new Progress<OperationProgress>(_ =>
+            {
+                try
+                {
+                    throw new InvalidOperationException("UI failed");
+                }
+                catch (Exception error) when (handleInCallback)
+                {
+                    handled.Add(error);
+                }
+            });
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        var options = new CloudMountOptions
+        {
+            Container = new ZipContainer(_ => File.OpenRead(Source)),
+            Root = BaseRoot,
+            Progress = progress,
+        };
+        var mount = new CloudMount(options, new FakeMountOperations());
+        await using (mount)
+            await mount.MountAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(MountState.Stopped, mount.State);
+        Assert.Empty(handled);
+        Assert.True(context.Count > 0);
+        if (handleInCallback)
+        {
+            int pending = context.Count;
+            context.Drain();
+            Assert.Equal(pending, handled.Count);
+        }
+        else
+        {
+            // Observe the UI-dispatch exception here rather than letting it
+            // become an unhandled exception in the test process.
+            Assert.Throws<InvalidOperationException>(() => context.Drain());
+        }
     }
 
     public void Dispose()
@@ -862,6 +945,29 @@ public sealed class CloudMountTransactionTests : IDisposable
 
         if (stage != "register")
             Assert.Contains("unregister", fake.Calls);
+    }
+
+    private sealed class QueuedProgressContext : SynchronizationContext
+    {
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _pending =
+            new();
+
+        public int Count => _pending.Count;
+
+        public override void Post(SendOrPostCallback d, object? state) =>
+            _pending.Enqueue((d, state));
+
+        public void Drain()
+        {
+            while (_pending.TryDequeue(out var work))
+                work.Callback(work.State);
+        }
+    }
+
+    private sealed class InlineProgress(Action<OperationProgress> report)
+        : IProgress<OperationProgress>
+    {
+        public void Report(OperationProgress value) => report(value);
     }
 
     private sealed class RecordingLogger : ILogger<CloudMount>

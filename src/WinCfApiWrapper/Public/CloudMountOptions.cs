@@ -31,6 +31,15 @@ public sealed record CloudMountOptions
     /// </summary>
     public int BulkHydrationConcurrency { get; init; } = 4;
 
+    /// <summary>Gets or initializes progress for indexing, placeholders, fetches, hydration, and shutdown.</summary>
+    /// <remarks>
+    /// Reports can originate on concurrent workers. Intermediate placeholder creation and resume reports
+    /// are throttled to at most ten per second; phase start and final counts are always reported.
+    /// Synchronous Report failures are logged. Callbacks posted asynchronously by Progress&lt;T&gt;
+    /// must handle exceptions inside the callback; the mount cannot catch exceptions on that context.
+    /// </remarks>
+    public IProgress<OperationProgress>? Progress { get; init; }
+
     /// <summary>Gets or initializes a caller-supplied eight-digit hexadecimal snapshot identity instead of hashing the listing.</summary>
     /// <remarks>For controlled immutable sources only. Change this ID whenever any content or listing changes.</remarks>
     public string? TrustedContentId { get; init; }
