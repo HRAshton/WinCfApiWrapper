@@ -328,18 +328,27 @@ public sealed class FetchCoordinatorTests : IDisposable
     }
 
     [Theory]
-    [InlineData(4096)]
-    [InlineData(2048)]
-    [InlineData(4097)]
-    [InlineData(-1)]
-    public async Task Fetch_UsesReturnedSeekPosition_WithoutTransferringWrongBytes(long seekResult)
+    [InlineData(4096, false)]
+    [InlineData(2048, false)]
+    [InlineData(4097, false)]
+    [InlineData(-1, false)]
+    [InlineData(4096, true)]
+    public async Task Fetch_UsesActualSeekPosition_WithoutTransferringWrongBytes(
+        long seekResult,
+        bool sliced
+    )
     {
         const int start = 4096;
         WriteArchive(8192);
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
         byte[] payload = new byte[8192];
         new Random(37).NextBytes(payload);
-        var input = new AdjustedSeekStream(payload, seekResult);
+        const int sliceOrigin = 37;
+        byte[] backing = new byte[payload.Length + sliceOrigin];
+        payload.CopyTo(backing, sliceOrigin);
+        Stream input = sliced
+            ? new MemoryStream(backing, sliceOrigin, payload.Length)
+            : new AdjustedSeekStream(payload, seekResult);
         var completed = new TaskCompletionSource<TransferCall>(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
@@ -374,21 +383,23 @@ public sealed class FetchCoordinatorTests : IDisposable
             );
         }
 
-        Assert.Equal(1, input.SeekCount);
+        if (input is AdjustedSeekStream adjusted)
+            Assert.Equal(1, adjusted.SeekCount);
         Assert.Equal(start, result.Offset);
         if (seekResult < 0 || seekResult > start)
         {
             Assert.Equal(NativeTransfer.StatusCloudFileUnsuccessful, result.CompletionStatus);
             Assert.Null(transferred);
             Assert.IsType<IOException>(Assert.Single(errors));
-            Assert.Equal(0, input.BytesRead);
+            Assert.Equal(0, Assert.IsType<AdjustedSeekStream>(input).BytesRead);
         }
         else
         {
             Assert.Equal(0, result.CompletionStatus);
             Assert.Equal(payload[start..], transferred);
             Assert.Empty(errors);
-            Assert.Equal(payload.Length - seekResult, input.BytesRead);
+            if (input is AdjustedSeekStream counted)
+                Assert.Equal(payload.Length - seekResult, counted.BytesRead);
         }
     }
 
@@ -456,6 +467,12 @@ public sealed class FetchCoordinatorTests : IDisposable
     {
         public int SeekCount { get; private set; }
         public long BytesRead { get; private set; }
+
+        public override long Position
+        {
+            get => seekResult < 0 ? seekResult : base.Position;
+            set => base.Position = value;
+        }
 
         public override long Seek(long offset, SeekOrigin origin)
         {

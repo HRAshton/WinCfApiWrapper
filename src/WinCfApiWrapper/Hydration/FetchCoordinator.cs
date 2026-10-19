@@ -279,7 +279,10 @@ internal sealed class FetchCoordinator : IAsyncDisposable
         long skipped = 0;
         if (input.CanSeek)
         {
-            skipped = input.Seek(start, SeekOrigin.Begin);
+            // On .NET 8, a sliced MemoryStream can return a backing-buffer
+            // offset from Seek. Position is relative to the stream itself.
+            input.Seek(start, SeekOrigin.Begin);
+            skipped = input.Position;
             if (skipped < 0 || skipped > start)
                 throw new IOException("Container stream sought outside the requested prefix.");
         }

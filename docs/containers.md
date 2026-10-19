@@ -26,7 +26,7 @@ var container = ZipContainer.FromHttp(client, new Uri("https://example.com/conte
 
 Keep the caller-owned client alive for the lifetime of the mount. The server must return exact `206 Partial Content` responses with `Content-Range` and a strong ETag or Last-Modified validator. Requests use `If-Range`; changed versions, encoded responses, and full-download fallbacks fail rather than silently downloading the archive. Reads request at most 64 KiB and do not round small files to 1 MiB blocks.
 
-One initial probe pins the length and validator for the container's lifetime; opening files reuses that snapshot without probing again. Create a new container to read a replacement archive. Prefer strong ETags: the Last-Modified fallback cannot distinguish changes within the timestamp's precision. Disabling entry metadata validation does not disable HTTP version checks.
+One initial probe pins the length and validator for the container's lifetime; opening files reuses that snapshot without probing again. Create a new container to read a replacement archive. Prefer strong ETags: the Last-Modified fallback cannot distinguish changes within the timestamp's precision. Disabling entry metadata validation does not disable HTTP range and archive-validator checks.
 
 HTTP requests use `SendAsync`, including for synchronous ZIP reads, so async-only handlers are supported. The client's default HTTP version and version policy are honored.
 
