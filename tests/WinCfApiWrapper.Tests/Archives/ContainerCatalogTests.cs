@@ -49,6 +49,31 @@ public sealed class ContainerCatalogTests
         };
 
         Assert.Throws<InvalidDataException>(() => new ContainerCatalog(entries!));
+        Assert.Throws<InvalidDataException>(() => new ContainerCatalog(entries!, "1234abcd"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("1234567")]
+    [InlineData("123456789")]
+    [InlineData("1234abcg")]
+    [InlineData("1234abc/")]
+    public void TrustedIdentity_RejectsInvalidIdentifiers(string identity)
+    {
+        ArgumentException error = Assert.Throws<ArgumentException>(() =>
+            new ContainerCatalog([], identity)
+        );
+        Assert.Equal("trustedContentId", error.ParamName);
+    }
+
+    [Theory]
+    [InlineData("1234abcd")]
+    [InlineData("1234ABCD")]
+    public void TrustedIdentity_ReplacesListingHash_WhilePreservingEntries(string identity)
+    {
+        var catalog = new ContainerCatalog([new ContainerEntry("file", 4, "v1")], identity);
+        Assert.Equal(identity, catalog.Fingerprint);
+        Assert.Equal(4, Assert.Single(catalog.Entries.Values).Length);
     }
 
     [Fact]

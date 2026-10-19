@@ -42,6 +42,58 @@ public sealed class CloudMountTransactionTests : IDisposable
 
     private string Source => Path.Combine(_scratch, "source.zip");
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TrustedResume_ReusesIdentity_AndHonorsPlaceholderValidation(
+        bool skipValidation
+    )
+    {
+        var fake = new FakeMountOperations();
+        int opens = 0;
+        var container = new ZipContainer(_ =>
+        {
+            opens++;
+            return File.OpenRead(Source);
+        });
+        var options = new CloudMountOptions
+        {
+            Container = container,
+            Root = BaseRoot,
+            TrustedContentId = "1234abcd",
+            SkipResumeValidation = skipValidation,
+        };
+        string firstRoot;
+        await using (var first = new CloudMount(options, fake))
+        {
+            await first.MountAsync(TestContext.Current.CancellationToken);
+            firstRoot = first.Root;
+        }
+
+        fake.Calls.Clear();
+        await using (var resumed = new CloudMount(options, fake))
+        {
+            await resumed.MountAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(firstRoot, resumed.Root);
+            Assert.EndsWith(".rzm-1234abcd", resumed.Root);
+        }
+
+        Assert.Equal(1, opens);
+        Assert.Equal(skipValidation ? 0 : 2, fake.Calls.Count(call => call == "validate"));
+    }
+
+    [Fact]
+    public void SkipResumeValidation_RequiresExplicitTrustedIdentity()
+    {
+        var options = new CloudMountOptions
+        {
+            Container = new ZipContainer(_ => File.OpenRead(Source)),
+            Root = BaseRoot,
+            SkipResumeValidation = true,
+        };
+        Assert.Throws<ArgumentException>(() => new CloudMount(options, new FakeMountOperations()));
+    }
+
     public void Dispose()
     {
         Directory.Delete(_scratch, true);

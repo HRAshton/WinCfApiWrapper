@@ -76,6 +76,14 @@ internal sealed class CloudMount : ICloudMount
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         ArgumentException.ThrowIfNullOrWhiteSpace(options.Root);
         ArgumentNullException.ThrowIfNull(options.Container);
+        if (options.SkipResumeValidation && options.TrustedContentId is null)
+        {
+            throw new ArgumentException(
+                "Skipping resume validation requires a trusted content ID.",
+                nameof(options)
+            );
+        }
+
         bool concurrencyOptionsAreInvalid =
             options.FetchWorkers <= 0
             || options.FetchQueueCapacity <= 0
@@ -138,7 +146,10 @@ internal sealed class CloudMount : ICloudMount
                 IReadOnlyCollection<ContainerEntry> entries = await _container
                     .GetEntriesAsync(cancellationToken)
                     .ConfigureAwait(false);
-                _catalog = await Task.Run(() => new ContainerCatalog(entries), cancellationToken)
+                _catalog = await Task.Run(
+                        () => new ContainerCatalog(entries, _options.TrustedContentId),
+                        cancellationToken
+                    )
                     .ConfigureAwait(false);
                 _root = MountPath.For(_basePath, _catalog.Fingerprint);
                 foreach (ContainerEntry entry in _catalog.Entries.Values)
@@ -378,7 +389,8 @@ internal sealed class CloudMount : ICloudMount
             {
                 ct.ThrowIfCancellationRequested();
                 string file = Path.Combine(Root, entry.RelativePath);
-                _operations.ValidatePlaceholder(file, entry);
+                if (!_options.SkipResumeValidation)
+                    _operations.ValidatePlaceholder(file, entry);
             }
         }
         else

@@ -26,6 +26,8 @@ ZIP/TAR inputs can contain huge numbers of entries, extreme decompression ratios
 
 A container fingerprint is a digest of the *declared listing and version metadata*, not proof that remote bytes have remained unchanged. `ZipContainer` derives per-entry versions from compressed length and CRC32, which are **not cryptographically collision-resistant**. Provide immutable archives and stable remote object versions; do not rely on CRC32 as an authenticity or tamper-resistance mechanism. Validate downloads independently when integrity matters.
 
+Trusted-source options deliberately relax consistency checks: `TrustedContentId` bypasses listing hashing, `SkipResumeValidation` skips placeholder metadata checks, and ZIP `validateEntryMetadata: false` skips rereading the selected central record. These options require an immutable source and an unchanged app-owned mount folder. Reusing a trusted ID for different content can expose stale hydrated files. Default settings retain consistency checks; safe-path and snapshot-membership validation remain enforced with trusted settings. The built-in HTTP ZIP source enforces exact ranges and remote version validators and rejects full-response fallbacks.
+
 ### Paths, permissions, and cleanup
 
 Use a dedicated, app-owned NTFS directory, not a volume root, shared folder, or user-data directory. `CleanupMounts(parentFolder)` and `Unregister(root)` deliberately delete recognized mount directories. Do not grant untrusted users write access to mount roots or a directory selected for cleanup. Application accounts need the Windows permissions required for Cloud Files sync-root registration.
