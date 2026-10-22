@@ -146,6 +146,29 @@ public sealed class ZipDirectoryTests
         Assert.Equal("payload", await reader.ReadToEndAsync(token));
     }
 
+    [Fact]
+    public void Zip64Directory_MetadataBudget_RespectsExactRawRecordBoundary()
+    {
+        byte[] bytes = BuildZip64Archive();
+        int recordSize;
+        using (var source = new MemoryStream(bytes))
+            recordSize = new ZipDirectory(source).ReadEntry().Record.Length;
+
+        Assert.Throws<InvalidDataException>(() =>
+            new ZipCatalog(
+                new MemoryStream(bytes),
+                maxEntries: 1,
+                maxCentralDirectoryMetadataBytes: recordSize - 1
+            )
+        );
+        var catalog = new ZipCatalog(
+            new MemoryStream(bytes),
+            maxEntries: 1,
+            maxCentralDirectoryMetadataBytes: recordSize
+        );
+        Assert.Single(catalog.Entries);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(64)]

@@ -46,7 +46,7 @@ internal sealed class ZipDirectory
         }
     }
 
-    public (long Offset, byte[] Record) ReadEntry()
+    public (long Offset, byte[] Record) ReadEntry(long? remainingMetadataBytes = null)
     {
         _source.Position = _position;
         byte[] header = new byte[46];
@@ -58,6 +58,13 @@ internal sealed class ZipDirectory
             + BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(28))
             + BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(30))
             + BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(32));
+        if (remainingMetadataBytes is { } remaining && size > remaining)
+        {
+            throw new InvalidDataException(
+                "ZIP central-directory metadata exceeds the configured byte limit."
+            );
+        }
+
         byte[] record = new byte[size];
         header.CopyTo(record, 0);
         _source.ReadExactly(record.AsSpan(46));

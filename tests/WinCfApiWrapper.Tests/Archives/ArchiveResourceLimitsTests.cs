@@ -215,6 +215,20 @@ public sealed class ArchiveResourceLimitsTests
         Assert.Contains(entries, entry => entry.RelativePath == "file-199999.txt");
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Zip_RejectsNonPositiveOptionalCentralMetadataLimit(long limit)
+    {
+        ArgumentOutOfRangeException error = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ZipContainer(
+                _ => new MemoryStream(),
+                new ArchiveResourceLimits { MaxCentralDirectoryMetadataBytes = limit }
+            )
+        );
+        Assert.Contains("MaxCentralDirectoryMetadataBytes", error.Message);
+    }
+
     [Fact]
     public void RejectsNonPositiveLimits()
     {
