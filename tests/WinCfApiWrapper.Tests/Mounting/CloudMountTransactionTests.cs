@@ -469,6 +469,86 @@ public sealed class CloudMountTransactionTests : IDisposable
     }
 
     [Fact]
+    public async Task Dispose_ExpiredTinyWait_WhenNoNativeWorkIsPending_StillSucceeds()
+    {
+        var fake = new FakeMountOperations();
+        var mount = new CloudMount(
+            new CloudMountOptions
+            {
+                Root = BaseRoot,
+                Container = new ZipContainer(_ => File.OpenRead(Source)),
+                ShutdownTimeout = TimeSpan.FromTicks(1),
+            },
+            fake
+        );
+
+        // An already-completed drain is safe even if the shutdown budget has
+        // expired by the time that drain is observed.
+        await mount.DisposeAsync().AsTask().WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(MountState.Stopped, mount.State);
+        Assert.False(mount.CallbacksRooted);
+        Assert.DoesNotContain("disconnect", fake.Calls);
+    }
+
+    [Fact]
+    public async Task Dispose_ProviderTimeoutException_IsNotAShutdownDeadline()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        var fake = new FakeMountOperations(
+            afterHydrate: () => throw new TimeoutException("provider read timed out"),
+            hydrateStarted: new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            ),
+            releaseHydrate: new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            ),
+            retainCallbacks: false
+        );
+        var logger = new RecordingLogger();
+        var mount = new CloudMount(
+            new CloudMountOptions
+            {
+                Root = BaseRoot,
+                Container = new ZipContainer(_ => File.OpenRead(Source)),
+                ShutdownTimeout = TimeSpan.FromSeconds(5),
+            },
+            fake,
+            logger
+        );
+
+        await mount.MountAsync(token);
+        Task hydration = mount.HydrateAsync("docs/one.txt", token);
+        try
+        {
+            await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5), token);
+            Task disposal = mount.DisposeAsync().AsTask();
+            Assert.Equal(MountState.Stopping, mount.State);
+            Assert.DoesNotContain("disconnect", fake.Calls);
+
+            fake.ReleaseHydrate!.TrySetResult();
+            TimeoutException providerError = await Assert.ThrowsAsync<TimeoutException>(() =>
+                hydration.WaitAsync(TimeSpan.FromSeconds(5), token)
+            );
+            Assert.Equal("provider read timed out", providerError.Message);
+            await disposal.WaitAsync(TimeSpan.FromSeconds(5), token);
+        }
+        finally
+        {
+            fake.ReleaseHydrate!.TrySetResult();
+            await mount.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), token);
+        }
+
+        Assert.Equal(MountState.Stopped, mount.State);
+        Assert.False(mount.CallbacksRooted);
+        Assert.Equal(1, fake.Calls.Count(call => call == "disconnect"));
+        Assert.DoesNotContain(logger.Entries, entry => entry.Level == LogLevel.Warning);
+    }
+
+    [Fact]
     public async Task Dispose_StalledFetch_RetainsNativeCallbacksUntilWorkerDrains()
     {
         CancellationToken token = TestContext.Current.CancellationToken;
