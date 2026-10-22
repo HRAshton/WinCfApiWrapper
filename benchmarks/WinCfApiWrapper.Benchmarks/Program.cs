@@ -48,14 +48,7 @@ internal static class Program
         string archivePath = options.Archive ?? Path.Combine(scratch, "fixture.zip");
         string mountBase = Path.Combine(scratch, "mount");
         var counts = new Counters();
-        using var client = options.HttpUrl is null
-            ? null
-            : new HttpClient(
-                new RangeCounterHandler(
-                    new HttpClientHandler { AutomaticDecompression = DecompressionMethods.None },
-                    counts
-                )
-            );
+        using HttpClient? client = CreateHttpClient(options, counts);
         using var services = new ServiceCollection().AddWinCfApiWrapper().BuildServiceProvider();
         ICloudMountFactory factory = services.GetRequiredService<ICloudMountFactory>();
         ISyncRootManager manager = services.GetRequiredService<ISyncRootManager>();
@@ -110,18 +103,18 @@ internal static class Program
             string json = JsonSerializer.Serialize(
                 new
                 {
-                SchemaVersion = 1,
-                TimestampUtc = DateTimeOffset.UtcNow,
-                Runtime = RuntimeInformation.FrameworkDescription,
-                OperatingSystem = RuntimeInformation.OSDescription,
-                ProcessArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
-                Source = options.HttpUrl is null ? "file" : "http",
-                Artifact = options.Archive is null ? "synthetic" : "provided",
-                FileCount = files.Length,
-                options.BytesPerFile,
-                options.RandomReads,
-                TrustedResume = true,
-                ValidateEntryMetadata = false,
+                    SchemaVersion = 1,
+                    TimestampUtc = DateTimeOffset.UtcNow,
+                    Runtime = RuntimeInformation.FrameworkDescription,
+                    OperatingSystem = RuntimeInformation.OSDescription,
+                    ProcessArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
+                    Source = options.HttpUrl is null ? "file" : "http",
+                    Artifact = options.Archive is null ? "synthetic" : "provided",
+                    FileCount = files.Length,
+                    options.BytesPerFile,
+                    options.RandomReads,
+                    TrustedResume = true,
+                    ValidateEntryMetadata = false,
                     Phases = phases,
                 },
                 new JsonSerializerOptions { WriteIndented = true }
@@ -186,6 +179,19 @@ internal static class Program
         {
             Console.Error.WriteLine($"Benchmark cleanup: unable to remove {scratch}: {error}");
         }
+    }
+
+    private static HttpClient? CreateHttpClient(Options options, Counters counts)
+    {
+        if (options.HttpUrl is null)
+            return null;
+
+        return new HttpClient(
+            new RangeCounterHandler(
+                new HttpClientHandler { AutomaticDecompression = DecompressionMethods.None },
+                counts
+            )
+        );
     }
 
     private static CloudMountOptions MountOptions(ZipContainer container, string path) => new()
