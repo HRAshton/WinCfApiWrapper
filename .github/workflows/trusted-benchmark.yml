@@ -14,7 +14,7 @@ on:
         required: true
         default: '1024'
       random_reads:
-        description: Number of randomized 4KiB reads
+        description: Number of randomized reads (up to 4 KiB each)
         type: string
         required: true
         default: '128'
