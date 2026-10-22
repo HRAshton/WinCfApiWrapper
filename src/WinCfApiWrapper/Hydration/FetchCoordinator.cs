@@ -23,6 +23,7 @@ internal sealed class FetchCoordinator : IAsyncDisposable
         ).ToInt32()
         + sizeof(long)
     );
+
     private readonly ContainerCatalog _catalog;
     private readonly Channel<FetchRequest> _channel;
     private readonly IContentContainer _container;
@@ -96,12 +97,13 @@ internal sealed class FetchCoordinator : IAsyncDisposable
     {
         try
         {
+            Interlocked.Increment(ref _attempts);
+
             if (infoPointer == nint.Zero || parametersPointer == nint.Zero)
                 throw new InvalidDataException("FETCH_DATA callback pointers are null.");
 
             CF_CALLBACK_INFO info = *(CF_CALLBACK_INFO*)infoPointer;
             var parameters = (CF_CALLBACK_PARAMETERS*)parametersPointer;
-            Interlocked.Increment(ref _attempts);
 
             // ParamSize excludes union padding; inspect only the fields it covers.
             if (parameters->ParamSize < MinimumFetchDataSize)
@@ -109,6 +111,7 @@ internal sealed class FetchCoordinator : IAsyncDisposable
 
             long requiredOffset = parameters->FetchData.RequiredFileOffset;
             long requiredLength = parameters->FetchData.RequiredLength;
+
             // A wholly invalid range has no safe native completion. An overlong
             // request beginning inside the file can still fail its valid overlap.
             if (
@@ -123,6 +126,7 @@ internal sealed class FetchCoordinator : IAsyncDisposable
             {
                 long alignedStart =
                     requiredOffset / NativeTransfer.Alignment * NativeTransfer.Alignment;
+
                 // The final range ends exactly at EOF and is legal even when short.
                 using var overlapping = new FetchRequest(
                     info,

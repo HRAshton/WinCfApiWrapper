@@ -448,6 +448,7 @@ public sealed partial class FetchCoordinatorTests : IDisposable
                 nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength)
             ).ToInt32()
         );
+
         // Documented ParamSize is four bytes plus the populated union arm,
         // not the eight-byte-aligned native offset of the union field.
         Assert.Equal(28u, (uint)(
@@ -579,6 +580,7 @@ public sealed partial class FetchCoordinatorTests : IDisposable
 
         Assert.Equal(0, calls);
         Assert.IsType<InvalidDataException>(Assert.Single(errors));
+        Assert.Equal(1, coordinator.Statistics.FetchAttempts);
         Assert.Equal(1, coordinator.Statistics.FailedFetches);
     }
 
