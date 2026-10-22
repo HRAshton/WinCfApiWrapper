@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -33,6 +34,7 @@ internal sealed class CloudMount : ICloudMount
     private readonly CancellationTokenSource _shutdown = new();
     private readonly NativeTransfer? _transfer;
     private ContainerCatalog? _catalog;
+    private GCHandle _callbackRoot;
     private bool _connected;
     private long _connectionKey;
     private FetchCoordinator? _coordinator;
@@ -129,6 +131,9 @@ internal sealed class CloudMount : ICloudMount
     public MountState State => _state;
 
     public MountStatistics Statistics => _coordinator?.Statistics ?? default;
+
+    // Internal observation point for connection-lifetime regression tests.
+    internal bool CallbacksRooted => _callbackRoot.IsAllocated;
 
     public async Task MountAsync(CancellationToken cancellationToken = default)
     {
@@ -459,8 +464,21 @@ internal sealed class CloudMount : ICloudMount
             },
             new() { Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_NONE, Callback = null! },
         ];
-        _connectionKey = _operations.Connect(Root, registrations);
-        _connected = true;
+        // CFAPI retains unmanaged callback pointers, not managed delegate references.
+        // Root the mount (and its delegates/coordinator) before native connection setup.
+        // The root is released only after a successful native disconnect.
+        _callbackRoot = GCHandle.Alloc(this);
+        try
+        {
+            _connectionKey = _operations.Connect(Root, registrations);
+            _connected = true;
+        }
+        catch
+        {
+            // Connect did not return a valid native connection key to disconnect.
+            _callbackRoot.Free();
+            throw;
+        }
 
         if (!resume)
         {
@@ -683,11 +701,10 @@ internal sealed class CloudMount : ICloudMount
         {
             _operations.Disconnect(_connectionKey);
             _connected = false;
+            _callbackRoot.Free();
         }
 
         _coordinator = null;
         _catalog = null;
-        GC.KeepAlive(_fetchCallback);
-        GC.KeepAlive(_cancelFetchCallback);
     }
 }

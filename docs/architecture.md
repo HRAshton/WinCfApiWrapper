@@ -41,6 +41,8 @@ CFAPI callback -> FetchCoordinator -> IContentContainer.OpenReadAsync
 4. `Statistics`, `State`, and `Error` communicate activity and failures. Background failures can surface via the event/logger; `HydrateAllAsync` reports per-file failures as an `AggregateException`.
 5. `DisposeAsync` stops the mount's connection. It does not necessarily remove registered roots and local placeholders; use `ISyncRootManager.Unregister` when removal is intended.
 
+The native connection roots its managed `CloudMount` owner and both callback delegates for the entire CFAPI connection lifetime. The root is established before `CfConnectSyncRoot` and released only after successful `CfDisconnectSyncRoot`; a failed disconnect retains it for a subsequent `DisposeAsync` retry. **Always explicitly dispose the mount**: dropping the last managed reference without disconnecting deliberately leaves native callback state alive and cannot release its resources automatically. The root is a connection-lifecycle cost, not per-fetch work.
+
 `CloudMountOptions` exposes `FetchWorkers`, `FetchQueueCapacity`, and `BulkHydrationConcurrency`. Positive limits are required; larger values consume more resources and are not automatically faster.
 
 ## Identity, re-use, and cleanup

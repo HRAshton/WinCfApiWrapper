@@ -55,6 +55,50 @@ public sealed class HydrationTests
     }
 
     [Fact]
+    public async Task NativeFetchCallbacks_RemainAliveUnderForcedGarbageCollection()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        string root = FixtureArchive.Root();
+        var mount = new CloudMount(
+            new CloudMountOptions
+            {
+                Container = new ZipContainer(
+                    _ => File.OpenRead(FixtureArchive.LocalPath),
+                    validateEntryMetadata: false
+                ),
+                Root = root,
+                TrustedContentId = "a11ce123",
+                SkipResumeValidation = true,
+            }
+        );
+        bool mounted = false;
+        try
+        {
+            await mount.MountAsync(token);
+            mounted = true;
+            Assert.True(mount.CallbacksRooted);
+
+            for (int i = 0; i < 6; i++)
+            {
+                GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
+                GC.WaitForPendingFinalizers();
+                string name = i % 2 == 0 ? "docs/hello.txt" : "docs/nested/info.txt";
+                string expected = i % 2 == 0
+                    ? "Hello from a checked-in ZIP fixture!\n"
+                    : "Nested content\n";
+                Assert.Equal(expected, await File.ReadAllTextAsync(mount.Resolve(name), token));
+            }
+        }
+        finally
+        {
+            await mount.DisposeAsync();
+            Assert.False(mount.CallbacksRooted);
+            if (mounted)
+                new SyncRootManager(NullLogger<SyncRootManager>.Instance).Unregister(mount.Root);
+        }
+    }
+
+    [Fact]
     public async Task HydrateAllAsync_AllFilesBecomeReadable()
     {
         CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
