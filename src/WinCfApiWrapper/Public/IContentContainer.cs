@@ -5,7 +5,8 @@ namespace WinCfApiWrapper.Public;
 /// The mount calls <see cref="GetEntriesAsync" /> once and may call <see cref="OpenReadAsync" /> concurrently for
 /// entries returned by that snapshot. Each opened stream must be readable, start at the beginning of the file, and be
 /// independent of other streams. The mount disposes every returned stream. The container instance remains owned by
-/// the caller.
+/// the caller. Implementations should honor cancellation and enforce finite I/O timeouts,
+/// especially for remote sources. The mount cannot safely terminate arbitrarily blocked provider code.
 /// </remarks>
 public interface IContentContainer
 {
