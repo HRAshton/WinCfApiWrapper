@@ -1,0 +1,57 @@
+name: TrustedID benchmark (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      entries:
+        description: Synthetic ZIP file count (1-250000)
+        type: string
+        required: true
+        default: '10000'
+      bytes_per_file:
+        description: Uncompressed bytes per file (1-1048576)
+        type: string
+        required: true
+        default: '1024'
+      random_reads:
+        description: Number of randomized 4KiB reads
+        type: string
+        required: true
+        default: '128'
+
+permissions:
+  contents: read
+
+jobs:
+  trusted-benchmark:
+    name: Windows TrustedID (${{ matrix.framework }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [net8.0-windows, net10.0-windows]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Run native TrustedID benchmark
+        shell: pwsh
+        env:
+          TARGET_FRAMEWORK: ${{ matrix.framework }}
+          ENTRY_COUNT: ${{ inputs.entries }}
+          BYTES_PER_FILE: ${{ inputs.bytes_per_file }}
+          READ_COUNT: ${{ inputs.random_reads }}
+        run: |
+          dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f $env:TARGET_FRAMEWORK -- --entries $env:ENTRY_COUNT --bytes-per-file $env:BYTES_PER_FILE --random-reads $env:READ_COUNT --output "trusted-baseline-$env:TARGET_FRAMEWORK.json"
+          if ($LASTEXITCODE -ne 0) { throw "Benchmark failed" }
+      - name: Upload raw benchmark JSON
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: trusted-baseline-${{ matrix.framework }}
+          path: trusted-baseline-${{ matrix.framework }}.json
+          if-no-files-found: error
