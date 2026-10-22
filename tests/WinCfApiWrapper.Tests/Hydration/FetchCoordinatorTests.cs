@@ -408,6 +408,7 @@ public sealed class FetchCoordinatorTests : IDisposable
                         transferred = new byte[checked((int)call.Length)];
                         Marshal.Copy(call.Buffer, transferred, 0, transferred.Length);
                     }
+
                     completed.TrySetResult(call);
                 }
             ),
@@ -514,10 +515,10 @@ public sealed class FetchCoordinatorTests : IDisposable
             set => base.Position = value;
         }
 
-        public override long Seek(long offset, SeekOrigin origin)
+        public override long Seek(long offset, SeekOrigin loc)
         {
             Assert.Equal(4096, offset);
-            Assert.Equal(SeekOrigin.Begin, origin);
+            Assert.Equal(SeekOrigin.Begin, loc);
             SeekCount++;
             Position = Math.Max(0, seekResult);
             return seekResult;
