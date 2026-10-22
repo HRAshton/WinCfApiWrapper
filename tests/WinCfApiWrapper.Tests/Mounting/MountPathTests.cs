@@ -86,6 +86,47 @@ public sealed class MountPathTests
     }
 
     [Fact]
+    public void Cleanup_TrailingSeparator_RetainsSiblingMarkerOnFailureAndRemovesOnRetry()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string root = Path.Combine(parent, "mount.rzm-1234abcd");
+        string withSeparator = root + Path.DirectorySeparatorChar;
+        string sibling = root + ".wincfapiwrapper-pending-cleanup";
+        Directory.CreateDirectory(root);
+        var fake = new FakeMountOperations(
+            fault: step =>
+            {
+                if (step == "unregister")
+                    throw new IOException("injected unregister failure");
+            },
+            registered: true
+        );
+        try
+        {
+            Assert.Throws<IOException>(() => MountCleanup.Delete(withSeparator, fake));
+            Assert.True(Directory.Exists(root));
+            Assert.True(File.Exists(sibling));
+            Assert.False(File.Exists(Path.Combine(root, ".wincfapiwrapper-pending-cleanup")));
+
+            fake.Fault = null;
+            MountCleanup.Delete(withSeparator, fake);
+
+            Assert.False(Directory.Exists(root));
+            Assert.False(File.Exists(sibling));
+            Assert.False(fake.Registered);
+        }
+        finally
+        {
+            if (Directory.Exists(parent))
+                Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
     public void Cleanup_AlreadyRemovedRoot_AlsoRemovesValidSiblingMarker()
     {
         string parent = Path.Combine(
@@ -143,6 +184,9 @@ public sealed class MountPathTests
             var fake = new FakeMountOperations(registered: true);
 
             Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.Throws<IOException>(() =>
+                MountCleanup.Delete(root + Path.DirectorySeparatorChar, fake)
+            );
             Assert.DoesNotContain("unregister", fake.Calls);
             Assert.Equal("keep", File.ReadAllText(Path.Combine(root, "keep.txt")));
         }

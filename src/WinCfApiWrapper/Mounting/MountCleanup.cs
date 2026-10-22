@@ -15,6 +15,9 @@ internal static class MountCleanup
         bool createdByThisAttempt = false
     )
     {
+        // Normalize before deriving the parent or sibling recovery marker. A
+        // trailing separator would otherwise place the marker inside the root.
+        root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         if (!MountPath.IsMount(root))
             throw new IOException($"Not a WinCfApiWrapper folder: {root}");
 
