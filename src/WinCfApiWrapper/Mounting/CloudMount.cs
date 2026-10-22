@@ -760,8 +760,10 @@ internal sealed class CloudMount : ICloudMount
         }
         catch (TimeoutException ex) when (!drain.IsCompleted)
         {
-            int activeFetches = _coordinator?.Statistics.ActiveFetches ?? 0;
-            int pendingFetches = _coordinator?.PendingRequestCount ?? 0;
+            // A pending drain can exist only after the fetch coordinator was initialized.
+            FetchCoordinator coordinator = _coordinator!;
+            int activeFetches = coordinator.Statistics.ActiveFetches;
+            int pendingFetches = coordinator.PendingRequestCount;
             int activeHydrations;
             lock (_hydrationLock)
                 activeHydrations = _activeHydrations.Count;
