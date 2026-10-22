@@ -100,13 +100,18 @@ public sealed class CloudMountTransactionTests : IDisposable
     public async Task CallbackRoot_ExistsOnlyDuringAnActiveConnection()
     {
         var fake = new FakeMountOperations(retainCallbacks: false);
-        await using CloudMount mount = Open(fake);
+        CloudMount mount = Open(fake);
         Assert.False(mount.CallbacksRooted);
+        try
+        {
+            await mount.MountAsync(TestContext.Current.CancellationToken);
+            Assert.True(mount.CallbacksRooted);
+        }
+        finally
+        {
+            await mount.DisposeAsync();
+        }
 
-        await mount.MountAsync(TestContext.Current.CancellationToken);
-        Assert.True(mount.CallbacksRooted);
-
-        await mount.DisposeAsync();
         Assert.False(mount.CallbacksRooted);
         Assert.Equal(1, fake.Calls.Count(call => call == "disconnect"));
     }

@@ -59,6 +59,7 @@ public sealed class HydrationTests
     {
         CancellationToken token = TestContext.Current.CancellationToken;
         (string root, WeakReference<CloudMount> weakMount) = await OpenOrphanedMountAsync(token);
+        CloudMount? recovered = null;
         try
         {
             // The helper has returned: the caller owns only a root path and a weak reference.
@@ -75,7 +76,7 @@ public sealed class HydrationTests
                 await File.ReadAllTextAsync(file, token)
             );
 
-            CloudMount recovered = Assert.IsType<CloudMount>(
+            recovered = Assert.IsType<CloudMount>(
                 weakMount.TryGetTarget(out CloudMount? target) ? target : null
             );
             Assert.True(recovered.CallbacksRooted);
@@ -87,10 +88,13 @@ public sealed class HydrationTests
         {
             // If the owner was collected, it cannot be safely disconnected; preserve the
             // directory for diagnosis rather than unregistering a potentially live root.
-            if (weakMount.TryGetTarget(out CloudMount? owner))
+            if (recovered is null && weakMount.TryGetTarget(out CloudMount? owner))
+                recovered = owner;
+
+            if (recovered is not null)
             {
-                await owner.DisposeAsync();
-                Assert.False(owner.CallbacksRooted);
+                await recovered.DisposeAsync();
+                Assert.False(recovered.CallbacksRooted);
                 new SyncRootManager(NullLogger<SyncRootManager>.Instance).Unregister(root);
             }
         }
