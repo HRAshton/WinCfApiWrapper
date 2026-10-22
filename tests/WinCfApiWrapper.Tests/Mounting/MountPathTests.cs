@@ -86,6 +86,174 @@ public sealed class MountPathTests
     }
 
     [Fact]
+    public void Cleanup_AlreadyRemovedRoot_AlsoRemovesValidSiblingMarker()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(parent);
+        try
+        {
+            string root = Path.Combine(parent, "removed.rzm-1234abcd");
+            string marker = root + ".wincfapiwrapper-pending-cleanup";
+            File.WriteAllText(marker, "WinCfApiWrapper cleanup v1");
+
+            MountCleanup.Delete(root, new FakeMountOperations());
+            Assert.False(File.Exists(marker));
+            Assert.False(Directory.Exists(root));
+        }
+        finally
+        {
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_MissingParent_RemainsIdempotent()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N"),
+            "missing.rzm-v2-" + new string('a', 32)
+        );
+        MountCleanup.Delete(root, new FakeMountOperations());
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Fact]
+    public void Cleanup_RejectsParentJunctionBeforeUnregistration()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string target = Path.Combine(parent, "actual-parent");
+        string redirectedParent = Path.Combine(parent, "redirected-parent");
+        string root = Path.Combine(redirectedParent, "mount.rzm-1234abcd");
+        Directory.CreateDirectory(target);
+        Directory.CreateDirectory(Path.Combine(target, "mount.rzm-1234abcd"));
+        File.WriteAllText(Path.Combine(target, "mount.rzm-1234abcd", "keep.txt"), "keep");
+        try
+        {
+            CreateJunction(redirectedParent, target);
+            var fake = new FakeMountOperations(registered: true);
+
+            Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.DoesNotContain("unregister", fake.Calls);
+            Assert.Equal("keep", File.ReadAllText(Path.Combine(root, "keep.txt")));
+        }
+        finally
+        {
+            if (Directory.Exists(redirectedParent))
+                Directory.Delete(redirectedParent);
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Cleanup_RejectsUnrecognizedSiblingMarkerBeforeUnregistration(bool directoryMarker)
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string root = Path.Combine(parent, "mount.rzm-1234abcd");
+        string marker = root + ".wincfapiwrapper-pending-cleanup";
+        Directory.CreateDirectory(root);
+        if (directoryMarker)
+            Directory.CreateDirectory(marker);
+        else
+            File.WriteAllText(marker, "some other owner");
+        try
+        {
+            var fake = new FakeMountOperations(registered: true);
+
+            IOException error = Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.Contains("Unrecognized cleanup marker", error.Message);
+            Assert.True(fake.Registered);
+            Assert.DoesNotContain("unregister", fake.Calls);
+            Assert.True(Directory.Exists(root));
+        }
+        finally
+        {
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_RejectsUnregisteredRootWithDirectoryMarker()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string root = Path.Combine(parent, "mount.rzm-1234abcd");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(root + ".wincfapiwrapper-pending-cleanup");
+        try
+        {
+            var fake = new FakeMountOperations();
+            Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.DoesNotContain("unregister", fake.Calls);
+            Assert.True(Directory.Exists(root));
+        }
+        finally
+        {
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_RejectsRootSwappedToJunctionDuringOwnershipCheck()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string root = Path.Combine(parent, "mount.rzm-1234abcd");
+        string moved = Path.Combine(parent, "original");
+        string target = Path.Combine(parent, "outside");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(target, "keep.txt"), "untouched");
+        try
+        {
+            var fake = new FakeMountOperations(
+                fault: step =>
+                {
+                    if (step == "check-owner")
+                    {
+                        Directory.Move(root, moved);
+                        CreateJunction(root, target);
+                    }
+                },
+                registered: true
+            );
+
+            IOException error = Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.Contains("changed during ownership validation", error.Message);
+            Assert.DoesNotContain("unregister", fake.Calls);
+            Assert.True(Directory.Exists(moved));
+            Assert.Equal("untouched", File.ReadAllText(Path.Combine(target, "keep.txt")));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root);
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
     public void Cleanup_RefusesUnregisteredForeignFolderWithMatchingSuffix()
     {
         string root = Path.Combine(
