@@ -207,6 +207,33 @@ public sealed partial class FetchCoordinatorTests : IDisposable
         Assert.Equal(1, coordinator.Statistics.FailedFetches);
     }
 
+    [Fact]
+    public async Task OnFetch_OversizedIdentity_RejectsAtSharedCfapiByteLimit()
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        var calls = new List<TransferCall>();
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer((_, call) => calls.Add(call))
+        );
+
+        Invoke(coordinator, new byte[ContainerPath.MaxIdentityBytes + 1], 8);
+
+        TransferCall failure = Assert.Single(calls);
+        Assert.Equal(NativeTransfer.StatusCloudFileUnsuccessful, failure.CompletionStatus);
+        Assert.Equal(0, failure.Offset);
+        Assert.Equal(8, failure.Length);
+        Assert.Equal(nint.Zero, failure.Buffer);
+        Assert.IsType<InvalidDataException>(Assert.Single(errors));
+        Assert.Equal(1, coordinator.Statistics.FetchAttempts);
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
     [Theory]
     [InlineData(0u)]
     [InlineData(4u)]

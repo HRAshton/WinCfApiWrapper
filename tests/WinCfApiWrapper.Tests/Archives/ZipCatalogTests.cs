@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text;
 using WinCfApiWrapper.Archives;
 using Xunit;
 
@@ -66,6 +67,39 @@ public sealed class ZipCatalogTests
     {
         using MemoryStream stream = BuildArchive("folder", "folder/file.txt");
         Assert.Throws<InvalidDataException>(() => new ZipCatalog(stream, maxEntries: 2));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Constructor_DeepPathFailsWithoutExpandingThousandsOfParents(bool directory)
+    {
+        string path = string.Concat(Enumerable.Repeat("a/", 29_000)) + "f";
+        if (directory)
+            path += "/";
+
+        using MemoryStream archive = BuildArchive(path);
+        Assert.Throws<InvalidDataException>(() => new ZipCatalog(archive, maxEntries: 1));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Constructor_Utf8IdentityBudgetRespectsByteBoundary(bool directory)
+    {
+        string prefix = string.Join('/', Enumerable.Repeat(new string('é', 200), 10));
+        string name = prefix + "/" + new string('x', 86);
+        Assert.Equal(4096, Encoding.UTF8.GetByteCount(name));
+        string suffix = directory ? "/" : string.Empty;
+
+        using (MemoryStream accepted = BuildArchive(name + suffix))
+        {
+            var catalog = new ZipCatalog(accepted, maxEntries: 1);
+            Assert.Equal(1, directory ? catalog.Directories.Count(d => d == name.Replace('/', '\\')) : catalog.Entries.Count);
+        }
+
+        using MemoryStream rejected = BuildArchive(name + "y" + suffix);
+        Assert.Throws<InvalidDataException>(() => new ZipCatalog(rejected, maxEntries: 1));
     }
 
     [Fact]

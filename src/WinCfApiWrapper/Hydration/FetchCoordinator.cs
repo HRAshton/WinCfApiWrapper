@@ -11,8 +11,6 @@ namespace WinCfApiWrapper.Hydration;
 // Bounded native callback queue. Worker tasks own their streams and outlive every queued request.
 internal sealed class FetchCoordinator : IAsyncDisposable
 {
-    private const int MaxIdentityBytes = 4096;
-
     // Only the required fields are read. The FETCH_DATA union has gained
     // optional trailing fields across Windows versions; older ParamSize
     // values remain usable if the required range fields are present.
@@ -247,7 +245,10 @@ internal sealed class FetchCoordinator : IAsyncDisposable
 
     private static unsafe string ReadIdentity(CF_CALLBACK_INFO info)
     {
-        if (info.FileIdentity == null || info.FileIdentityLength is 0 or > MaxIdentityBytes)
+        if (
+            info.FileIdentity == null
+            || info.FileIdentityLength is 0 or > ContainerPath.MaxIdentityBytes
+        )
             throw new InvalidDataException("Invalid file identity length.");
 
         byte[] bytes = new byte[checked((int)info.FileIdentityLength)];

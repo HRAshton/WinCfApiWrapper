@@ -1,7 +1,11 @@
+using System.Text;
+
 namespace WinCfApiWrapper.Containers;
 
 internal static class ContainerPath
 {
+    internal const int MaxIdentityBytes = 4096;
+
     private static readonly char[] InvalidCharacters = ['<', '>', ':', '"', '|', '?', '*', '\0'];
 
     private static readonly string[] ReservedNames =
@@ -39,6 +43,41 @@ internal static class ContainerPath
             throw new InvalidDataException($"Unsafe container path: {path}");
 
         return string.Join('\\', segments);
+    }
+
+    // Validate before expanding parents. File identities must fit the CFAPI
+    // 4-KiB UTF-8 budget; directory paths must also be addressable by descendants.
+    internal static void ValidateIdentityLength(string normalizedPath)
+    {
+        int byteCount = Encoding.UTF8.GetByteCount(normalizedPath);
+        if (byteCount > MaxIdentityBytes)
+        {
+            // Do not duplicate attacker-controlled archive paths in diagnostics.
+            throw new InvalidDataException(
+                $"File identity is {byteCount} UTF-8 bytes; limit is {MaxIdentityBytes} bytes."
+            );
+        }
+    }
+
+    // Every ancestor of an existing directory is already in the set, so stop
+    // as soon as a shared parent is found instead of rebuilding its prefixes.
+    internal static void AddParentDirectories(
+        string normalizedPath,
+        bool isDirectory,
+        HashSet<string> directories
+    )
+    {
+        int length = isDirectory
+            ? normalizedPath.Length
+            : normalizedPath.LastIndexOf('\\');
+        while (length > 0)
+        {
+            string parent = normalizedPath[..length];
+            if (!directories.Add(parent))
+                break;
+
+            length = normalizedPath.LastIndexOf('\\', length - 1);
+        }
     }
 
     private static bool IsReservedDeviceName(string segment)
