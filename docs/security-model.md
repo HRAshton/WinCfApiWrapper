@@ -24,6 +24,8 @@ ZIP/TAR inputs can contain huge numbers of entries, extreme decompression ratios
 
 ### Identity and source immutability
 
+Automatic mount paths now use a versioned `.rzm-v2-` folder suffix containing **128 bits** of the already-computed listing SHA-256 instead of the previous 32-bit prefix, protecting against the demonstrated short-prefix collision. Existing eight-hex `TrustedContentId` mounts retain their original `.rzm-xxxxxxxx` names and caller-uniqueness contract. Legacy automatic directories are never silently deleted or reused by v2 mounting; both formats remain recognizable for **explicit** cleanup under a dedicated owned parent.
+
 A container fingerprint is a digest of the *declared listing and version metadata*, not proof that remote bytes have remained unchanged. `ZipContainer` derives per-entry versions from compressed length and CRC32, which are **not cryptographically collision-resistant**. Provide immutable archives and stable remote object versions; do not rely on CRC32 as an authenticity or tamper-resistance mechanism. Validate downloads independently when integrity matters.
 
 Trusted-source options deliberately relax consistency checks: `TrustedContentId` bypasses listing hashing, `SkipResumeValidation` skips placeholder metadata checks, and ZIP `validateEntryMetadata: false` skips rereading the selected central record. These options require an immutable source and an unchanged app-owned mount folder. Reusing a trusted ID for different content can expose stale hydrated files. Default settings retain consistency checks; safe-path and snapshot-membership validation remain enforced with trusted settings. The built-in HTTP ZIP source enforces exact ranges and remote version validators and rejects full-response fallbacks.
