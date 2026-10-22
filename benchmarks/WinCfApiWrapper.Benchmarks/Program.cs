@@ -17,7 +17,7 @@ internal static class Program
     {
         if (args.Contains("--help"))
         {
-            Console.WriteLine("Options: --entries N --bytes-per-file N --random-reads N --archive ZIP --http-url URL --work-parent DIR --output JSON");
+            Console.WriteLine("Options: --entries N --bytes-per-file N --random-reads N --files-per-directory N --resume-probe-passes N --archive ZIP --http-url URL --work-parent DIR --output JSON");
             return 0;
         }
 
@@ -59,7 +59,7 @@ internal static class Program
         try
         {
             if (options.Archive is null)
-                GenerateArchive(archivePath, options.Entries, options.BytesPerFile);
+                GenerateArchive(archivePath, options.Entries, options.BytesPerFile, options.FilesPerDirectory);
             if (!File.Exists(archivePath))
                 throw new FileNotFoundException("Archive not found", archivePath);
 
@@ -77,10 +77,28 @@ internal static class Program
             ICloudMount cold = active;
             await Measure("cold-mount", () => cold.MountAsync(), counts, phases);
             mountRoot = cold.Root;
-            string[] files = (await original.GetEntriesAsync())
-                .Where(e => !e.IsDirectory).Select(e => e.RelativePath).ToArray();
+            IReadOnlyCollection<ContainerEntry> listing = await original.GetEntriesAsync();
+            string[] files = listing.Where(e => !e.IsDirectory)
+                .Select(e => e.RelativePath).ToArray();
             if (files.Length == 0)
                 throw new InvalidDataException("Archive contains no files.");
+
+            List<DirectoryProbeResult>? directoryProbes = null;
+            if (options.ResumeProbePasses > 0)
+            {
+                // Synthetic ZIP entries contain only files; their parent directories
+                // are implicit. Enumerate the actual mounted tree so the probe
+                // covers every directory checked on resume, not just ZIP entries
+                // explicitly marked as directories.
+                string[] directories = Directory.GetDirectories(
+                    cold.Root,
+                    "*",
+                    SearchOption.AllDirectories
+                );
+                if (directories.Length == 0)
+                    throw new InvalidOperationException("No directories available for resume probe.");
+                directoryProbes = CompareDirectoryProbes(directories, options.ResumeProbePasses);
+            }
 
             await Measure("random-file-reads", () => RandomReads(cold, files, options.RandomReads), counts, phases);
             await Measure("hydrate-all", () => cold.HydrateAllAsync(), counts, phases);
@@ -113,6 +131,8 @@ internal static class Program
                     FileCount = files.Length,
                     options.BytesPerFile,
                     options.RandomReads,
+                    options.FilesPerDirectory,
+                    DirectoryProbes = directoryProbes,
                     TrustedResume = true,
                     ValidateEntryMetadata = false,
                     Phases = phases,
@@ -274,7 +294,60 @@ internal static class Program
         );
     }
 
-    private static void GenerateArchive(string path, int entries, int bytesPerFile)
+    // Optional A/B comparison on the same mounted directories, outside the
+    // timed mount phases. Alternate pass ordering to reduce warm-cache bias.
+    private static List<DirectoryProbeResult> CompareDirectoryProbes(string[] paths, int passes)
+    {
+        var samples = new List<DirectoryProbeResult>(passes * 2);
+        for (int pass = 0; pass < passes; pass++)
+        {
+            for (int order = 0; order < 2; order++)
+            {
+                bool singleProbe = (pass + order) % 2 == 0;
+                long allocationStart = GC.GetTotalAllocatedBytes(precise: true);
+                Stopwatch clock = Stopwatch.StartNew();
+                foreach (string path in paths)
+                {
+                    bool valid;
+                    if (singleProbe)
+                    {
+                        FileAttributes attributes = File.GetAttributes(path);
+                        valid = (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint))
+                            == FileAttributes.Directory;
+                    }
+                    else
+                    {
+                        valid = Directory.Exists(path)
+                            && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0;
+                    }
+
+                    if (!valid)
+                        throw new IOException($"Resume directory failed probe: {path}");
+                }
+
+                clock.Stop();
+                samples.Add(new DirectoryProbeResult(
+                    singleProbe ? "single-get-attributes" : "exists-then-attributes",
+                    pass,
+                    paths.Length,
+                    clock.Elapsed.TotalMilliseconds,
+                    GC.GetTotalAllocatedBytes(precise: true) - allocationStart
+                ));
+            }
+        }
+
+        return samples;
+    }
+
+    private sealed record DirectoryProbeResult(
+        string Mode,
+        int Pass,
+        int DirectoryCount,
+        double Milliseconds,
+        long AllocatedBytesProcessWide
+    );
+
+    private static void GenerateArchive(string path, int entries, int bytesPerFile, int filesPerDirectory)
     {
         var content = new byte[bytesPerFile];
         new Random(1234).NextBytes(content);
@@ -283,7 +356,7 @@ internal static class Program
         for (int i = 0; i < entries; i++)
         {
             ZipArchiveEntry entry = zip.CreateEntry(
-                $"build/{i / 100:D5}/file-{i:D7}.bin",
+                $"build/{i / filesPerDirectory:D5}/file-{i:D7}.bin",
                 CompressionLevel.NoCompression
             );
             using Stream writer = entry.Open();
@@ -423,6 +496,8 @@ internal static class Program
         int Entries,
         int BytesPerFile,
         int RandomReads,
+        int FilesPerDirectory,
+        int ResumeProbePasses,
         string? Archive,
         string? HttpUrl,
         string? WorkParent,
@@ -432,6 +507,7 @@ internal static class Program
         public static Options Parse(string[] args)
         {
             int entries = 10000, fileBytes = 1024, reads = 128;
+            int filesPerDirectory = 100, probePasses = 0;
             string? archive = null, url = null, parent = null, output = null;
             for (int i = 0; i < args.Length; i += 2)
             {
@@ -443,6 +519,8 @@ internal static class Program
                     case "--entries": entries = int.Parse(value); break;
                     case "--bytes-per-file": fileBytes = int.Parse(value); break;
                     case "--random-reads": reads = int.Parse(value); break;
+                    case "--files-per-directory": filesPerDirectory = int.Parse(value); break;
+                    case "--resume-probe-passes": probePasses = int.Parse(value); break;
                     case "--archive": archive = Path.GetFullPath(value); break;
                     case "--http-url": url = value; break;
                     case "--work-parent": parent = value; break;
@@ -452,7 +530,8 @@ internal static class Program
             }
 
             if (entries < 1 || entries > 250000 || fileBytes < 1
-                || fileBytes > 1048576 || reads < 0)
+                || fileBytes > 1048576 || reads < 0
+                || filesPerDirectory < 1 || probePasses < 0 || probePasses > 50)
                 throw new ArgumentOutOfRangeException(nameof(args), "Invalid benchmark size.");
             if (
                 url is not null
@@ -463,7 +542,10 @@ internal static class Program
                 )
             )
                 throw new ArgumentException("HTTP mode requires --archive and an HTTP(S) URL for the identical ZIP.");
-            return new Options(entries, fileBytes, reads, archive, url, parent, output);
+            return new Options(
+                entries, fileBytes, reads, filesPerDirectory, probePasses,
+                archive, url, parent, output
+            );
         }
     }
 }
