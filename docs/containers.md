@@ -50,6 +50,16 @@ One initial probe pins the length and validator for the container's lifetime; op
 
 HTTP requests use `SendAsync`, including for synchronous ZIP reads, so async-only handlers are supported. The client's default HTTP version and version policy are honored.
 
+For remote servers that may stall, `ZipContainer.FromHttp` accepts an optional positive `rangeReadTimeout`. It bounds each initial range-probe request and each subsequent range request **including body consumption**. Null (default) retains the previous `HttpClient` and caller cancellation behavior, with no new per-request deadline allocations. For example:
+```csharp
+var remote = ZipContainer.FromHttp(
+    client, uri,
+    validateEntryMetadata: false,
+    rangeReadTimeout: TimeSpan.FromSeconds(30)
+);
+```
+Deadline expiry throws `TimeoutException` while explicit caller cancellation remains `OperationCanceledException`. A timeout is **per range request**, not a total archive/hydration deadline; a ZIP read may require several ranges. These deadlines use cancellation tokens, and do **not** forcibly abort a custom HTTP handler or response stream that ignores cancellation. Set appropriate `HttpClient.Timeout`/handler timeouts, keep HTTP content cancellation-cooperative, and use `CloudMountOptions.ShutdownTimeout` separately to bound disposal waiting. This does not change the existing request sizes, archive validators, retries, or trusted ZIP direct-stream factory.
+
 The directory is indexed once per container instance. Each subsequent file open uses its cached central record and validates just that record against the source; other directory records are not fetched or parsed. The source factory still runs for each open, so it must provide efficient seeking rather than eagerly downloading all bytes. Entries remain decoded by .NET `ZipArchive`, including ZIP64 entries.
 
 ZIP discovery accepts trailing bytes after the archive comment, matching .NET `ZipArchive` within its bounded end-record search. Cached directory bytes are available only during directory parsing; entry opening and data reads use the original archive bounds. These bounds remain enforced when metadata consistency checks are disabled, without additional source reads.

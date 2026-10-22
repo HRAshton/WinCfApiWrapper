@@ -44,22 +44,26 @@ public sealed class ZipContainer(
     /// <param name="uri">The archive URL; the server must support ranges and version validators.</param>
     /// <param name="limits">Optional archive resource limits.</param>
     /// <param name="validateEntryMetadata">Whether to reread the selected central record; disable only for immutable sources.</param>
+    /// <param name="rangeReadTimeout">Optional positive deadline per HTTP range request (including the initial probe and response body). Null preserves the HttpClient/caller timeout behavior.</param>
     /// <returns>A ZIP container backed by independent range streams.</returns>
     /// <remarks>
     /// One initial probe pins the archive length and validator for every stream in this container.
     /// All requests use SendAsync and honor the client's default HTTP version and version policy.
     /// Prefer a strong ETag: Last-Modified cannot detect replacements within its timestamp precision.
+    /// A deadline cancels cooperative I/O; it cannot forcibly interrupt a handler that ignores cancellation.
+    /// Caller cancellation remains an OperationCanceledException; deadline expiration reports TimeoutException.
     /// </remarks>
     public static ZipContainer FromHttp(
         HttpClient client,
         Uri uri,
         ArchiveResourceLimits? limits = null,
-        bool validateEntryMetadata = true
+        bool validateEntryMetadata = true,
+        TimeSpan? rangeReadTimeout = null
     )
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(uri);
-        var source = new HttpArchiveSource(client, uri);
+        var source = new HttpArchiveSource(client, uri, rangeReadTimeout);
         return new ZipContainer(source.OpenRead, limits, validateEntryMetadata);
     }
 

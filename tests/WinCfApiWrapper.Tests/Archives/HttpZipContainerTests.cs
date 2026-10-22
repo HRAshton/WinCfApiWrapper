@@ -12,6 +12,138 @@ namespace WinCfApiWrapper.Tests.Archives;
 
 public sealed class HttpZipContainerTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void FromHttp_NonPositiveRangeDeadline_IsRejected(long milliseconds)
+    {
+        using var client = new HttpClient(new RangeHandler(BuildArchive([1], 1)));
+        ArgumentOutOfRangeException error = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            ZipContainer.FromHttp(
+                client,
+                new Uri("https://archive.test/files.zip"),
+                rangeReadTimeout: TimeSpan.FromMilliseconds(milliseconds)
+            )
+        );
+        Assert.Equal("rangeReadTimeout", error.ParamName);
+    }
+
+    [Fact]
+    public void FromHttp_DeadlineBeyondCancelAfterRange_IsRejected()
+    {
+        using var client = new HttpClient(new RangeHandler(BuildArchive([1], 1)));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            ZipContainer.FromHttp(
+                client,
+                new Uri("https://archive.test/files.zip"),
+                rangeReadTimeout: TimeSpan.FromMilliseconds(uint.MaxValue)
+            )
+        );
+    }
+
+    [Fact]
+    public async Task RangeDeadline_ProbeTimesOut_AndCanRetryWithoutPoisoningSnapshot()
+    {
+        using var responses = new RangeHandler(BuildArchive([1, 2, 3], 1));
+        using var handler = new OnceStalledRangeHandler(responses, stallProbe: true);
+        using var client = new HttpClient(handler);
+        var container = ZipContainer.FromHttp(
+            client,
+            new Uri("https://archive.test/files.zip"),
+            rangeReadTimeout: TimeSpan.FromMilliseconds(200)
+        );
+        CancellationToken token = TestContext.Current.CancellationToken;
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            container.GetEntriesAsync(token).AsTask()
+        );
+
+        ContainerEntry entry = Assert.Single(await container.GetEntriesAsync(token));
+        Assert.Equal("file-0.bin", entry.RelativePath);
+        Assert.Equal(1, responses.ProbeCount); // Timed-out probe cannot pin the snapshot.
+    }
+
+    [Fact]
+    public async Task RangeDeadline_HeadersTimeout_PreservesCursorAndAllowsRetry()
+    {
+        using var responses = new RangeHandler(BuildArchive([1, 2, 3], 1));
+        using var handler = new OnceStalledRangeHandler(responses, stallRange: true);
+        using var client = new HttpClient(handler);
+        var source = new HttpArchiveSource(
+            client,
+            new Uri("https://archive.test/files.zip"),
+            TimeSpan.FromMilliseconds(200)
+        );
+        using Stream input = source.OpenRead(TestContext.Current.CancellationToken);
+        byte[] data = new byte[4];
+
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            input.ReadAsync(data.AsMemory(), TestContext.Current.CancellationToken).AsTask()
+        );
+        Assert.Equal(0, input.Position);
+        Assert.Equal(4, await input.ReadAsync(data.AsMemory(), TestContext.Current.CancellationToken));
+        Assert.Equal(responses.Archive[..4], data);
+        Assert.Equal(1, responses.ProbeCount);
+    }
+
+    [Fact]
+    public async Task RangeDeadline_StalledBodyTimeout_PreservesCursorAndAllowsRetry()
+    {
+        using var responses = new RangeHandler(BuildArchive([1, 2, 3], 1));
+        var blockedBody = new BlockingHttpBodyStream();
+        int remainingStalls = 1;
+        responses.TransformResponse = response =>
+        {
+            if (response.Content.Headers.ContentRange!.To == 0 ||
+                Interlocked.Exchange(ref remainingStalls, 0) == 0)
+                return;
+
+            ContentRangeHeaderValue range = response.Content.Headers.ContentRange!;
+            response.Content.Dispose();
+            response.Content = new StreamContent(blockedBody);
+            response.Content.Headers.ContentRange = range;
+        };
+        using var client = new HttpClient(responses);
+        var source = new HttpArchiveSource(
+            client,
+            new Uri("https://archive.test/files.zip"),
+            TimeSpan.FromMilliseconds(200)
+        );
+        using Stream input = source.OpenRead(TestContext.Current.CancellationToken);
+        byte[] data = new byte[4];
+
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            input.ReadAsync(data.AsMemory(), TestContext.Current.CancellationToken).AsTask()
+        );
+        Assert.Equal(0, input.Position);
+        Assert.Equal(4, await input.ReadAsync(data.AsMemory(), TestContext.Current.CancellationToken));
+        Assert.Equal(responses.Archive[..4], data);
+        Assert.Equal(1, responses.ProbeCount);
+    }
+
+    [Fact]
+    public async Task RangeDeadline_CallerCancellationRemainsCancellationNotTimeout()
+    {
+        using var responses = new RangeHandler(BuildArchive([1, 2, 3], 1));
+        using var handler = new OnceStalledRangeHandler(responses, stallRange: true);
+        using var client = new HttpClient(handler);
+        var source = new HttpArchiveSource(
+            client,
+            new Uri("https://archive.test/files.zip"),
+            TimeSpan.FromSeconds(10)
+        );
+        using Stream input = source.OpenRead(TestContext.Current.CancellationToken);
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken
+        );
+        Task<int> pending = input.ReadAsync(new byte[4].AsMemory(), cancel.Token).AsTask();
+        await handler.Stalled.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        cancel.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        Assert.Equal(0, input.Position);
+        Assert.Equal(1, responses.ProbeCount);
+    }
+
     [Fact]
     public async Task SmallFiles_ReadOnlyTheirOwnMetadataAndContent_AfterOneIndex()
     {
@@ -636,6 +768,86 @@ public sealed class HttpZipContainerTests
             await Task.Yield();
             return responses.Respond(request, cancellationToken);
         }
+    }
+
+    private sealed class OnceStalledRangeHandler(
+        RangeHandler responses,
+        bool stallProbe = false,
+        bool stallRange = false
+    ) : HttpMessageHandler
+    {
+        private int _probeAttempts;
+        private int _rangeAttempts;
+
+        public TaskCompletionSource Stalled { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken
+        )
+        {
+            bool probe = request.Headers.IfRange is null;
+            bool stall = probe
+                ? stallProbe && Interlocked.Increment(ref _probeAttempts) == 1
+                : stallRange && Interlocked.Increment(ref _rangeAttempts) == 1;
+            if (stall)
+            {
+                Stalled.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+
+            return responses.Respond(request, cancellationToken);
+        }
+    }
+
+    private sealed class BlockingHttpBodyStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default
+        )
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken
+        ) => ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override void Flush() =>
+            throw new NotSupportedException();
     }
 
     private sealed class NonPumpingContext : SynchronizationContext
