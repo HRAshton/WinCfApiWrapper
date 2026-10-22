@@ -32,12 +32,9 @@ internal sealed class ZipCatalog
             string name = ContainerPath.Normalize(entry.FullName);
             if (name.Length == 0)
                 continue;
+            ContainerPath.ValidateIdentityLength(name);
 
-            if (isDirectory)
-            {
-                _directories.Add(name);
-            }
-            else
+            if (!isDirectory)
             {
                 bool isDuplicate = !_entries.TryAdd(
                     name,
@@ -58,12 +55,7 @@ internal sealed class ZipCatalog
                     throw new InvalidDataException($"Duplicate ZIP path: {name}");
             }
 
-            string? parent = isDirectory ? name : Path.GetDirectoryName(name);
-            while (!string.IsNullOrEmpty(parent))
-            {
-                _directories.Add(parent);
-                parent = Path.GetDirectoryName(parent);
-            }
+            ContainerPath.AddParentDirectories(name, isDirectory, _directories);
         }
 
         foreach (string file in _entries.Keys)

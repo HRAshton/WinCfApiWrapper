@@ -1,3 +1,4 @@
+using System.Text;
 using WinCfApiWrapper.Containers;
 using WinCfApiWrapper.Public;
 using Xunit;
@@ -82,6 +83,70 @@ public sealed class ContainerCatalogTests
         ContainerEntry entry = new("file", 0, null!);
 
         Assert.Throws<ArgumentNullException>(() => new ContainerCatalog([entry]));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Constructor_RejectsDeepPathBeforeExpandingParents(bool directory)
+    {
+        string name = string.Concat(Enumerable.Repeat("a/", 29_000)) + "f";
+        var entry = new ContainerEntry(name, 0, directory ? string.Empty : "v1", directory);
+
+        Assert.Throws<InvalidDataException>(() => new ContainerCatalog([entry], "1234abcd"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Constructor_UsesUtf8BytesNotUtf16LengthAtIdentityBoundary(bool directory)
+    {
+        string prefix = string.Join('/', Enumerable.Repeat(new string('é', 200), 10));
+        string boundary = prefix + "/" + new string('x', 86);
+        Assert.Equal(4096, Encoding.UTF8.GetByteCount(boundary));
+        string rejected = boundary + "y";
+
+        string version = directory ? string.Empty : "v1";
+        var accepted = new ContainerCatalog(
+            [new ContainerEntry(boundary, 0, version, directory)],
+            "1234abcd"
+        );
+        Assert.Equal(1, directory ? accepted.Directories.Count(d => d == boundary.Replace('/', '\\')) : accepted.Entries.Count);
+        Assert.Throws<InvalidDataException>(() =>
+            new ContainerCatalog([new ContainerEntry(rejected, 0, version, directory)], "1234abcd")
+        );
+    }
+
+    [Fact]
+    public void SharedParents_KeepStableDirectorySetAndFingerprint()
+    {
+        var catalog = new ContainerCatalog([
+            new ContainerEntry("A/Sub/one.txt", 1, "v1"),
+            new ContainerEntry("A/Sub/two.txt", 2, "v2"),
+            new ContainerEntry("empty/nested/", 0, string.Empty, true),
+        ]);
+
+        Assert.Equal(4, catalog.Directories.Count);
+        Assert.Contains(@"A\Sub", catalog.Directories);
+        Assert.Contains(@"A", catalog.Directories);
+        Assert.Contains(@"empty\nested", catalog.Directories);
+        Assert.Equal(
+            "ECBF9612088E6BBD0D7A689AD56327F1B778CB6DB466C1BE49309C25829753F7",
+            catalog.Fingerprint
+        );
+    }
+
+    [Fact]
+    public void SharedParentAcrossCaseVariants_IsNotExpandedAgain()
+    {
+        var catalog = new ContainerCatalog([
+            new ContainerEntry("Dir/Sub/one.txt", 1, "v1"),
+            new ContainerEntry("DIR/SUB/two.txt", 2, "v2"),
+        ], "1234abcd");
+
+        Assert.Equal(2, catalog.Directories.Count);
+        Assert.Contains(@"Dir\Sub", catalog.Directories);
+        Assert.Contains(@"Dir", catalog.Directories);
     }
 
     [Fact]

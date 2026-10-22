@@ -23,6 +23,7 @@ internal sealed class ContainerCatalog
             string name = ContainerPath.Normalize(entry.RelativePath);
             if (name.Length == 0)
                 throw new InvalidDataException("Container entry path cannot be empty.");
+            ContainerPath.ValidateIdentityLength(name);
             if (entry.Length < 0)
                 throw new InvalidDataException($"Container entry has a negative length: {name}");
             ArgumentNullException.ThrowIfNull(entry.Version);
@@ -43,17 +44,10 @@ internal sealed class ContainerCatalog
             }
 
             ContainerEntry normalized = entry with { RelativePath = name };
-            if (entry.IsDirectory)
-                _directories.Add(name);
-            else if (!_entries.TryAdd(name, normalized))
+            if (!entry.IsDirectory && !_entries.TryAdd(name, normalized))
                 throw new InvalidDataException($"Duplicate container path: {name}");
 
-            string? parent = entry.IsDirectory ? name : Path.GetDirectoryName(name);
-            while (!string.IsNullOrEmpty(parent))
-            {
-                _directories.Add(parent);
-                parent = Path.GetDirectoryName(parent);
-            }
+            ContainerPath.AddParentDirectories(name, entry.IsDirectory, _directories);
         }
 
         foreach (string file in _entries.Keys)

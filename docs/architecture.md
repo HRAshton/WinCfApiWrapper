@@ -5,7 +5,7 @@ WinCfApiWrapper presents caller-supplied read-only content as a Windows Cloud Fi
 ## Components
 
 - `ICloudMountFactory` creates an `ICloudMount` using `CloudMountOptions`. `AddWinCfApiWrapper()` registers the factory and sync-root manager with dependency injection.
-- `IContentContainer` exposes a stable directory/file listing and independently readable streams. `ContainerCatalog` normalizes paths, rejects conflicting entries, and computes a fingerprint from the listing.
+- `IContentContainer` exposes a stable directory/file listing and independently readable streams. `ContainerCatalog` normalizes paths, rejects conflicting entries, and computes a fingerprint from the listing. During indexing, generic and ZIP catalogs check the existing 4,096-byte CFAPI UTF-8 identity limit before expanding directory parents; shared ancestors are indexed once. Oversized archive paths fail before potentially quadratic prefix expansion. No additional archive/network reads or opt-in security depth cap are introduced.
 - `CloudMount` coordinates indexing, registration, connection, placeholder creation, fetch callbacks, shutdown, and rollback.
 - `FetchCoordinator` bounds the native fetch queue and coordinates requests against the container.
 - `NativeTransfer` and native interop code translate managed buffers and failures into Windows Cloud Files transfers.

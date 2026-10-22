@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
-using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Win32.SafeHandles;
@@ -13,7 +12,6 @@ namespace WinCfApiWrapper.Mounting;
 
 internal sealed class CloudMount : ICloudMount
 {
-    private const int MaxIdentityBytes = 4096;
     private readonly HashSet<Task> _activeHydrations = [];
     private readonly string _basePath;
     private readonly CF_CALLBACK _cancelFetchCallback;
@@ -158,17 +156,6 @@ internal sealed class CloudMount : ICloudMount
                     )
                     .ConfigureAwait(false);
                 _root = MountPath.For(_basePath, _catalog.Fingerprint);
-                foreach (ContainerEntry entry in _catalog.Entries.Values)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (Encoding.UTF8.GetByteCount(entry.RelativePath) > MaxIdentityBytes)
-                    {
-                        throw new InvalidDataException(
-                            $"File identity exceeds {MaxIdentityBytes} bytes: {entry.RelativePath}"
-                        );
-                    }
-                }
-
                 await Task.Run(() => SetupNative(cancellationToken), cancellationToken)
                     .ConfigureAwait(false);
                 _state = MountState.Mounted;
