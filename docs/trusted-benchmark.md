@@ -75,3 +75,38 @@ For each phase JSON contains elapsed milliseconds, **process-wide** managed allo
 The [manual workflow](../.github/workflows/trusted-benchmark.yml) performs Windows benchmarks on both supported runtimes and uploads the JSON artifacts. Standard CI **compiles only**; it does not automatically execute costly native benchmarks.
 
 The current PR adds instrumentation and documentation, **not a measured baseline**. Before merging this draft, run the commands above from a Windows checkout of the PR branch. GitHub Actions `workflow_dispatch` workflows generally must exist on the **default branch** before they can be launched through the Actions UI; after this PR is merged, use the manual workflow on `master` and save its raw artifacts **before the next performance-sensitive PR**.
+
+## PERF-02 — trusted-resume directory probe experiment
+
+The original resume implementation calls `Directory.Exists` and then
+`File.GetAttributes` for every catalog directory, even when
+`SkipResumeValidation = true`. The proposed single-probe implementation
+uses `File.GetAttributes` alone, verifying both the directory and
+non-reparse attribute on **every ancestor**. It retains the missing/invalid
+directory error, native connection ordering, and per-file placeholder policy.
+
+For a controlled local synthetic ZIP, profile both algorithms against the
+**same mounted directories** from a Windows checkout:
+
+```powershell
+dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net8.0-windows -- --entries 10000 --bytes-per-file 1024 --random-reads 128 --files-per-directory 1 --resume-probe-passes 7 --output perf02-net8.json
+dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net10.0-windows -- --entries 10000 --bytes-per-file 1024 --random-reads 128 --files-per-directory 1 --resume-probe-passes 7 --output perf02-net10.json
+```
+
+`DirectoryProbes` compares the former `exists-then-attributes` loop with
+`single-get-attributes` (wall time and process-wide managed allocations).
+Sample order alternates to reduce filesystem cache bias. This A/B microprobe
+is **not** proof of an end-to-end warm-resume improvement; keep it outside
+regular timed phases. The `--resume-probe-passes` default is `0` so
+existing benchmark behavior is unchanged. `--files-per-directory` defaults
+to 100, matching prior synthetic layouts.
+
+**Do not merge this optimization solely on the microprobe.** Alternately
+benchmark parent/PR commits on the same Windows host with identical ZIP
+artifacts (e.g. one-file-per-directory and 100-files-per-directory), five
+runs per commit, recording ZIP indexing, cold mount, warm resume, random fetch,
+hydrate-all, shutdown, allocation and source I/O. The existing benchmark
+separately times ZIP index and whole mount, but **does not yet separate**
+catalog construction from native connection; any remaining time attribution
+to those phases needs additional Windows instrumentation. Require a repeatable
+warm-resume win and no cold-mount or fetch regressions before merge.

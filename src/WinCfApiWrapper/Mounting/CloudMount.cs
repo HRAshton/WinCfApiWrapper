@@ -413,10 +413,7 @@ internal sealed class CloudMount : ICloudMount
             {
                 ct.ThrowIfCancellationRequested();
                 string path = Path.Combine(Root, directory);
-                bool isValidDirectory =
-                    Directory.Exists(path)
-                    && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0;
-                if (!isValidDirectory)
+                if (!IsValidResumeDirectory(path))
                     throw new IOException($"Mount directory is missing or invalid: {path}");
                 completed++;
                 ReportSetupProgress(directory);
@@ -518,6 +515,26 @@ internal sealed class CloudMount : ICloudMount
             }
 
             ct.ThrowIfCancellationRequested();
+        }
+    }
+
+    // Query metadata only once per directory while retaining all existing
+    // ancestor and reparse checks. Missing/inaccessible paths remain invalid.
+    internal static bool IsValidResumeDirectory(string path)
+    {
+        try
+        {
+            FileAttributes attributes = File.GetAttributes(path);
+            return (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint))
+                == FileAttributes.Directory;
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or System.Security.SecurityException
+        )
+        {
+            return false;
         }
     }
 

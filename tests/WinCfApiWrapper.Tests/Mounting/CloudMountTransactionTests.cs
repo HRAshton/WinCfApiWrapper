@@ -429,6 +429,80 @@ public sealed class CloudMountTransactionTests : IDisposable
     }
 
     [Fact]
+    public void ResumeDirectoryProbe_RejectsMissingPathsAndFiles()
+    {
+        string folder = Path.Combine(_scratch, "directory-probe");
+        string file = Path.Combine(_scratch, "directory-probe.txt");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(file, "not a directory");
+
+        Assert.True(CloudMount.IsValidResumeDirectory(folder));
+        Assert.False(CloudMount.IsValidResumeDirectory(file));
+        Assert.False(CloudMount.IsValidResumeDirectory(Path.Combine(_scratch, "missing")));
+    }
+
+    [Fact]
+    public void ResumeDirectoryProbe_RejectsJunction()
+    {
+        string target = Path.Combine(_scratch, "junction-target");
+        string link = Path.Combine(_scratch, "junction-link");
+        Directory.CreateDirectory(target);
+        var start = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+        {
+            Arguments = $"/d /c mklink /J \"{link}\" \"{target}\"",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        using System.Diagnostics.Process process = System.Diagnostics.Process.Start(start)!;
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
+        try
+        {
+            Assert.True(Directory.Exists(link));
+            Assert.True((File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0);
+            Assert.False(CloudMount.IsValidResumeDirectory(link));
+        }
+        finally
+        {
+            Directory.Delete(link);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TrustedResume_MissingOrReplacedDirectory_RejectsBeforeConnecting(bool replacedWithFile)
+    {
+        var fake = new FakeMountOperations();
+        string parent = Path.Combine(_scratch, Guid.NewGuid().ToString("N"));
+        var options = new CloudMountOptions
+        {
+            Root = parent,
+            Container = new ZipContainer(_ => File.OpenRead(Source)),
+            TrustedContentId = "1234abcd",
+            SkipResumeValidation = true,
+        };
+        string mountPath;
+        await using (var initial = new CloudMount(options, fake))
+        {
+            await initial.MountAsync(TestContext.Current.CancellationToken);
+            mountPath = initial.Root;
+        }
+
+        Directory.Delete(Path.Combine(mountPath, "docs"), recursive: true);
+        if (replacedWithFile)
+            File.WriteAllText(Path.Combine(mountPath, "docs"), "replaced");
+
+        fake.Calls.Clear();
+        await using var resumed = new CloudMount(options, fake);
+        IOException error = await Assert.ThrowsAsync<IOException>(() =>
+            resumed.MountAsync(TestContext.Current.CancellationToken)
+        );
+        Assert.Contains("Mount directory is missing or invalid", error.Message);
+        Assert.DoesNotContain("connect", fake.Calls);
+    }
+
+    [Fact]
     public async Task Resume_ValidRoot_ConnectsWithoutUpdatingRegistration()
     {
         CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
