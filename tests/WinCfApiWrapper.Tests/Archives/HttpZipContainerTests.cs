@@ -68,8 +68,9 @@ public sealed class HttpZipContainerTests
             + BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(26))
             + BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(28));
         changed[dataOffset] ^= 0xff;
-        int directoryOffset = (int)
-            BinaryPrimitives.ReadUInt32LittleEndian(original.AsSpan(original.Length - 6));
+        int directoryOffset = (int)BinaryPrimitives.ReadUInt32LittleEndian(
+            original.AsSpan(original.Length - 6)
+        );
         Assert.Equal(original[directoryOffset..], changed[directoryOffset..]);
         DateTimeOffset modified = new(2026, 10, 19, 12, 0, 0, TimeSpan.Zero);
         using var handler = new RangeHandler(original)
@@ -639,7 +640,7 @@ public sealed class HttpZipContainerTests
 
     private sealed class NonPumpingContext : SynchronizationContext
     {
-        public override void Post(SendOrPostCallback callback, object? state) =>
+        public override void Post(SendOrPostCallback d, object? state) =>
             throw new InvalidOperationException(
                 "A synchronous read must not capture this context."
             );
