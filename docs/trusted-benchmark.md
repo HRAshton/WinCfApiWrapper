@@ -38,7 +38,7 @@ dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net10.0
 dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net10.0-windows -- --archive C:\artifacts\installer.zip --random-reads 128 --output artifact.json
 ```
 
-The benchmark creates a GUID-named scratch directory below `--work-parent` (default: `%TEMP%\WinCfApiWrapper.Benchmarks`). It unregisters and deletes **only its own** mount folders, never the supplied archive or an existing directory. Run benchmarks sequentially; they manipulate real native sync roots. On failed cleanup, inspect and remove the **dedicated benchmark folder** manually.
+The benchmark creates a GUID-named scratch directory below `--work-parent` (default: `%TEMP%\WinCfApiWrapper.Benchmarks`). It unregisters and deletes **only its own** mount folders, never the supplied archive or an existing directory. Run benchmarks sequentially; they manipulate real native sync roots. Cleanup errors are printed to stderr without masking a benchmark failure. If native disconnect/unregister fails, the generated scratch folder is intentionally retained; inspect and clean the **dedicated benchmark folder** manually only after verifying no live mount is connected.
 
 For real HTTP range-source tests, pass both `--archive` (the local **identical** ZIP used to define the fixture) and `--http-url` (an endpoint returning valid 206 ranges and a stable ETag/Last-Modified):
 
@@ -54,7 +54,7 @@ dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net10.0
 | --- | --- |
 | `zip-index-only` | First index on a separate container (does not prime cold mount). |
 | `cold-mount` | Fresh index, register/connect, create placeholders. |
-| `random-file-reads` | Deterministic, seeded 4 KiB reads of native placeholder paths. |
+| `random-file-reads` | Deterministic, seeded reads of **up to 4 KiB** from native placeholder paths (1 KiB for the default synthetic fixture). |
 | `hydrate-all` | Explicit hydration, including any files already hydrated by reads. |
 | `dispose-cold` | Disconnect the cold mount. |
 | `warm-resume-same-container` | Reconnect using the previously indexed container. |
