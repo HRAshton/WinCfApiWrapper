@@ -49,10 +49,12 @@ internal static class ContainerPath
     // 4-KiB UTF-8 budget; directory paths must also be addressable by descendants.
     internal static void ValidateIdentityLength(string normalizedPath)
     {
-        if (Encoding.UTF8.GetByteCount(normalizedPath) > MaxIdentityBytes)
+        int byteCount = Encoding.UTF8.GetByteCount(normalizedPath);
+        if (byteCount > MaxIdentityBytes)
         {
+            // Do not duplicate attacker-controlled archive paths in diagnostics.
             throw new InvalidDataException(
-                $"File identity exceeds {MaxIdentityBytes} bytes: {normalizedPath}"
+                $"File identity is {byteCount} UTF-8 bytes; limit is {MaxIdentityBytes} bytes."
             );
         }
     }
