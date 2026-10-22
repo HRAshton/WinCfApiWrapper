@@ -5,7 +5,7 @@ internal static class MountCleanup
     // Written only when cleaning up or rolling back, never on the mount/fetch path.
     // This is evidence of a prior cleanup attempt, not an authentication token:
     // the application must exclusively own the containing parent directory.
-    private const string PendingCleanupMarker = ".wincfapiwrapper-pending-cleanup";
+    private const string PendingCleanupMarkerSuffix = ".wincfapiwrapper-pending-cleanup";
     private const string PendingCleanupContents = "WinCfApiWrapper cleanup v1";
 
     internal static void Delete(
@@ -25,10 +25,12 @@ internal static class MountCleanup
         }
         catch (FileNotFoundException)
         {
+            RemoveCompletedCleanupMarker(root);
             return;
         }
         catch (DirectoryNotFoundException)
         {
+            RemoveCompletedCleanupMarker(root);
             return;
         }
 
@@ -89,6 +91,7 @@ internal static class MountCleanup
             throw new IOException($"Mount path changed during cleanup: {root}");
 
         Directory.Delete(root, recursive: true);
+        RemoveCompletedCleanupMarker(root);
     }
 
     private static void ValidateDirectoryTree(string root)
@@ -108,15 +111,25 @@ internal static class MountCleanup
         }
     }
 
+    // Sidecar lies *outside* the directory being recursively deleted:
+    // a failed Directory.Delete may already have removed some child files.
+    private static string PendingMarkerPath(string root) =>
+        root + PendingCleanupMarkerSuffix;
+
     private static bool HasPendingCleanupMarker(string root)
     {
-        string file = Path.Combine(root, PendingCleanupMarker);
+        string file = PendingMarkerPath(root);
         try
         {
-            return (File.GetAttributes(file) & FileAttributes.ReparsePoint) == 0
+            FileAttributes attributes = File.GetAttributes(file);
+            return (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) == 0
                 && File.ReadAllText(file) == PendingCleanupContents;
         }
         catch (FileNotFoundException)
+        {
+            return false;
+        }
+        catch (DirectoryNotFoundException)
         {
             return false;
         }
@@ -124,17 +137,30 @@ internal static class MountCleanup
 
     private static void WritePendingCleanupMarker(string root)
     {
-        string file = Path.Combine(root, PendingCleanupMarker);
+        string file = PendingMarkerPath(root);
         try
         {
-            if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0)
-                throw new IOException($"Cleanup marker is a reparse point: {file}");
+            FileAttributes attributes = File.GetAttributes(file);
+            if (
+                (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0
+                || File.ReadAllText(file) != PendingCleanupContents
+            )
+                throw new IOException($"Unrecognized cleanup marker file: {file}");
+
+            return; // An earlier cleanup attempt already supplied valid evidence.
         }
         catch (FileNotFoundException)
         {
-            // New marker: no symlink to follow.
+            // Create a new sidecar in the private mount parent, never in the root.
         }
 
         File.WriteAllText(file, PendingCleanupContents);
+    }
+
+    private static void RemoveCompletedCleanupMarker(string root)
+    {
+        // Do not delete unrelated contents even if they happen to use our suffix.
+        if (HasPendingCleanupMarker(root))
+            File.Delete(PendingMarkerPath(root));
     }
 }

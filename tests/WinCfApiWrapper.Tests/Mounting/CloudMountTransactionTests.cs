@@ -1515,6 +1515,7 @@ public sealed class CloudMountTransactionTests : IDisposable
             Assert.True(Directory.Exists(Root));
             Assert.False(fake.Registered);
             Assert.True(File.Exists(Path.Combine(Root, "docs", "one.txt")));
+            Assert.True(File.Exists(Root + ".wincfapiwrapper-pending-cleanup"));
         }
         finally
         {
@@ -1525,6 +1526,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         fake.Fault = null;
         MountCleanup.Delete(Root, fake);
         Assert.False(Directory.Exists(Root));
+        Assert.False(File.Exists(Root + ".wincfapiwrapper-pending-cleanup"));
     }
 
     private static unsafe void SimulateFetch(FakeMountOperations fake)
