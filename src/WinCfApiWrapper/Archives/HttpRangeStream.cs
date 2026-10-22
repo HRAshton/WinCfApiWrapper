@@ -32,6 +32,7 @@ internal sealed class HttpRangeStream(
             ObjectDisposedException.ThrowIf(_disposed, this);
             return _position;
         }
+
         set
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -46,8 +47,11 @@ internal sealed class HttpRangeStream(
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         token.ThrowIfCancellationRequested();
-        int size = (int)
-            Math.Min(Math.Min(buffer.Length, 64 * 1024), Math.Max(0, Length - Position));
+        long boundedLength = Math.Min(
+            Math.Min(buffer.Length, 64 * 1024),
+            Math.Max(0, Length - Position)
+        );
+        int size = (int)boundedLength;
         if (size == 0)
             return 0;
         byte[] rented = ArrayPool<byte>.Shared.Rent(size);
@@ -76,8 +80,11 @@ internal sealed class HttpRangeStream(
         CancellationToken readToken =
             linked?.Token ?? (cancellationToken.CanBeCanceled ? cancellationToken : token);
         readToken.ThrowIfCancellationRequested();
-        int size = (int)
-            Math.Min(Math.Min(buffer.Length, 64 * 1024), Math.Max(0, Length - Position));
+        long boundedLength = Math.Min(
+            Math.Min(buffer.Length, 64 * 1024),
+            Math.Max(0, Length - Position)
+        );
+        int size = (int)boundedLength;
         if (size == 0)
             return 0;
         using CancellationTokenSource? deadline = source.CreateDeadline(readToken);

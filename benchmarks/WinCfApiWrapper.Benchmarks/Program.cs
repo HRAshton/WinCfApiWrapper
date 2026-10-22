@@ -63,12 +63,15 @@ internal static class Program
         try
         {
             if (options.Archive is null)
+            {
                 GenerateArchive(
                     archivePath,
                     options.Entries,
                     options.BytesPerFile,
                     options.FilesPerDirectory
                 );
+            }
+
             if (!File.Exists(archivePath))
                 throw new FileNotFoundException("Archive not found", archivePath);
 
@@ -110,9 +113,12 @@ internal static class Program
                     SearchOption.AllDirectories
                 );
                 if (directories.Length == 0)
+                {
                     throw new InvalidOperationException(
                         "No directories available for resume probe."
                     );
+                }
+
                 directoryProbes = CompareDirectoryProbes(directories, options.ResumeProbePasses);
             }
 
@@ -277,11 +283,13 @@ internal static class Program
     )
     {
         if (client is not null)
+        {
             return ZipContainer.FromHttp(
                 client,
                 new Uri(options.HttpUrl!, UriKind.Absolute),
                 validateEntryMetadata: false
             );
+        }
 
         return new ZipContainer(
             _ =>
@@ -422,19 +430,19 @@ internal static class Program
         }
     }
 
+    private readonly record struct Snapshot(
+        long FileOpens,
+        long FileBytes,
+        long RangeRequests,
+        long RangeBytes
+    );
+
     private sealed record DirectoryProbeResult(
         string Mode,
         int Pass,
         int DirectoryCount,
         double Milliseconds,
         long AllocatedBytesProcessWide
-    );
-
-    private readonly record struct Snapshot(
-        long FileOpens,
-        long FileBytes,
-        long RangeRequests,
-        long RangeBytes
     );
 
     private sealed record PhaseResult(
@@ -648,9 +656,12 @@ internal static class Program
                     || parsed.Scheme is not ("http" or "https")
                 )
             )
+            {
                 throw new ArgumentException(
                     "HTTP mode requires --archive and an HTTP(S) URL for the identical ZIP."
                 );
+            }
+
             return new Options(
                 entries,
                 fileBytes,
