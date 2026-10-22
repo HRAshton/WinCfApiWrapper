@@ -97,7 +97,9 @@ public abstract class BufferedContainer : IContentContainer
                 if (entries.Count >= Limits.MaxEntries)
                     throw new InvalidDataException("Container exceeds maximum entry count.");
                 if (item.Content.LongLength > Limits.MaxBufferedBytes - totalBytes)
-                    throw new InvalidDataException("Container exceeds maximum buffered byte count.");
+                    throw new InvalidDataException(
+                        "Container exceeds maximum buffered byte count."
+                    );
                 totalBytes += item.Content.LongLength;
 
                 string path = ContainerPath.Normalize(item.Path);

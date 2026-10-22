@@ -5,39 +5,16 @@ namespace WinCfApiWrapper.Archives;
 
 // A container owns one remote snapshot. Streams share its validator and length,
 // so file opens cannot silently adopt a replacement archive or repeat the probe.
-internal sealed class HttpArchiveSource(HttpClient client, Uri uri, TimeSpan? rangeReadTimeout = null)
+internal sealed class HttpArchiveSource(
+    HttpClient client,
+    Uri uri,
+    TimeSpan? rangeReadTimeout = null
+)
 {
     private readonly TimeSpan? _rangeReadTimeout = ValidateRangeReadTimeout(rangeReadTimeout);
 
     private object? _initializationLock;
     private Snapshot? _snapshot;
-
-    private static TimeSpan? ValidateRangeReadTimeout(TimeSpan? value)
-    {
-        if (value is { } duration &&
-            (duration <= TimeSpan.Zero ||
-             duration > TimeSpan.FromMilliseconds(uint.MaxValue - 1)))
-        {
-            throw new ArgumentOutOfRangeException(
-                "rangeReadTimeout",
-                value,
-                "Range-read timeout must be positive and supported, or null to use existing HttpClient and caller timeouts."
-            );
-        }
-
-        return value;
-    }
-
-    // Deadlines are strictly opt-in; default HTTP reads allocate no extra CTS.
-    internal CancellationTokenSource? CreateDeadline(CancellationToken token)
-    {
-        if (_rangeReadTimeout is not { } timeout)
-            return null;
-
-        CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        deadline.CancelAfter(timeout);
-        return deadline;
-    }
 
     public Stream OpenRead(CancellationToken token)
     {
@@ -83,6 +60,36 @@ internal sealed class HttpArchiveSource(HttpClient client, Uri uri, TimeSpan? ra
             response.Dispose();
             throw;
         }
+    }
+
+    // Deadlines are strictly opt-in; default HTTP reads allocate no extra CTS.
+    internal CancellationTokenSource? CreateDeadline(CancellationToken token)
+    {
+        if (_rangeReadTimeout is not { } timeout)
+            return null;
+
+        CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(timeout);
+        return deadline;
+    }
+
+    private static TimeSpan? ValidateRangeReadTimeout(TimeSpan? value)
+    {
+        if (
+            value is { } duration
+            && (
+                duration <= TimeSpan.Zero || duration > TimeSpan.FromMilliseconds(uint.MaxValue - 1)
+            )
+        )
+        {
+            throw new ArgumentOutOfRangeException(
+                "rangeReadTimeout",
+                value,
+                "Range-read timeout must be positive and supported, or null to use existing HttpClient and caller timeouts."
+            );
+        }
+
+        return value;
     }
 
     private static void Validate(
@@ -149,13 +156,17 @@ internal sealed class HttpArchiveSource(HttpClient client, Uri uri, TimeSpan? ra
                 );
             }
 
-            return new Snapshot(response.Content.Headers.ContentRange!.Length!.Value, etag, modified);
+            return new Snapshot(
+                response.Content.Headers.ContentRange!.Length!.Value,
+                etag,
+                modified
+            );
         }
-        catch (OperationCanceledException ex) when (
-            deadline is not null &&
-            deadline.IsCancellationRequested &&
-            !token.IsCancellationRequested
-        )
+        catch (OperationCanceledException ex)
+            when (deadline is not null
+                && deadline.IsCancellationRequested
+                && !token.IsCancellationRequested
+            )
         {
             throw new TimeoutException("HTTP archive range probe exceeded its deadline.", ex);
         }

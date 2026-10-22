@@ -253,12 +253,7 @@ public sealed partial class FetchCoordinatorTests : IDisposable
             new NativeTransfer((_, call) => calls.Add(call))
         );
 
-        Invoke(
-            coordinator,
-            Encoding.UTF8.GetBytes("file.txt"),
-            8,
-            parameterSize: parameterSize
-        );
+        Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), 8, parameterSize: parameterSize);
 
         Assert.Empty(calls);
         Assert.IsType<InvalidDataException>(Assert.Single(errors));
@@ -286,7 +281,10 @@ public sealed partial class FetchCoordinatorTests : IDisposable
 
         Invoke(coordinator, [0xFF], 8, parameterSize: paramSize);
 
-        Assert.Equal(NativeTransfer.StatusCloudFileUnsuccessful, Assert.Single(calls).CompletionStatus);
+        Assert.Equal(
+            NativeTransfer.StatusCloudFileUnsuccessful,
+            Assert.Single(calls).CompletionStatus
+        );
         Assert.IsType<DecoderFallbackException>(Assert.Single(errors));
         Assert.Equal(1, coordinator.Statistics.FailedFetches);
     }
@@ -297,9 +295,16 @@ public sealed partial class FetchCoordinatorTests : IDisposable
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
         uint minimumSize = (uint)(
             sizeof(uint)
-            + Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
-                nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength)
-            ).ToInt32()
+            + Marshal
+                .OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+                    nameof(
+                        CF_CALLBACK_PARAMETERS
+                            ._Anonymous_e__Union
+                            ._FetchData_e__Struct
+                            .RequiredLength
+                    )
+                )
+                .ToInt32()
             + sizeof(long)
         );
         int calls = 0;
@@ -313,12 +318,7 @@ public sealed partial class FetchCoordinatorTests : IDisposable
             new NativeTransfer((_, _) => calls++)
         );
 
-        Invoke(
-            coordinator,
-            Encoding.UTF8.GetBytes("file.txt"),
-            8,
-            parameterSize: minimumSize - 1
-        );
+        Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), 8, parameterSize: minimumSize - 1);
 
         Assert.Equal(0, calls);
         Assert.IsType<InvalidDataException>(Assert.Single(errors));
@@ -331,9 +331,16 @@ public sealed partial class FetchCoordinatorTests : IDisposable
         (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
         uint minimumSize = (uint)(
             sizeof(uint)
-            + Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
-                nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength)
-            ).ToInt32()
+            + Marshal
+                .OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+                    nameof(
+                        CF_CALLBACK_PARAMETERS
+                            ._Anonymous_e__Union
+                            ._FetchData_e__Struct
+                            .RequiredLength
+                    )
+                )
+                .ToInt32()
             + sizeof(long)
         );
         var calls = new List<TransferCall>();
@@ -460,31 +467,56 @@ public sealed partial class FetchCoordinatorTests : IDisposable
     {
         Assert.Equal(
             8,
-            Marshal.OffsetOf<CF_CALLBACK_PARAMETERS>(nameof(CF_CALLBACK_PARAMETERS.Anonymous))
+            Marshal
+                .OffsetOf<CF_CALLBACK_PARAMETERS>(nameof(CF_CALLBACK_PARAMETERS.Anonymous))
                 .ToInt32()
         );
         Assert.Equal(
             8,
-            Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
-                nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredFileOffset)
-            ).ToInt32()
+            Marshal
+                .OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+                    nameof(
+                        CF_CALLBACK_PARAMETERS
+                            ._Anonymous_e__Union
+                            ._FetchData_e__Struct
+                            .RequiredFileOffset
+                    )
+                )
+                .ToInt32()
         );
         Assert.Equal(
             16,
-            Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
-                nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength)
-            ).ToInt32()
+            Marshal
+                .OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+                    nameof(
+                        CF_CALLBACK_PARAMETERS
+                            ._Anonymous_e__Union
+                            ._FetchData_e__Struct
+                            .RequiredLength
+                    )
+                )
+                .ToInt32()
         );
 
         // Documented ParamSize is four bytes plus the populated union arm,
         // not the eight-byte-aligned native offset of the union field.
-        Assert.Equal(28u, (uint)(
-            sizeof(uint)
-            + Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
-                nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength)
-            ).ToInt32()
-            + sizeof(long)
-        ));
+        Assert.Equal(
+            28u,
+            (uint)(
+                sizeof(uint)
+                + Marshal
+                    .OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+                        nameof(
+                            CF_CALLBACK_PARAMETERS
+                                ._Anonymous_e__Union
+                                ._FetchData_e__Struct
+                                .RequiredLength
+                        )
+                    )
+                    .ToInt32()
+                + sizeof(long)
+            )
+        );
     }
 
     [Theory]
@@ -910,10 +942,12 @@ public sealed partial class FetchCoordinatorTests : IDisposable
             };
             var parameters = new CF_CALLBACK_PARAMETERS
             {
-                ParamSize = parameterSize ?? (uint)(
-                    sizeof(uint)
-                    + sizeof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct)
-                ),
+                ParamSize =
+                    parameterSize
+                    ?? (uint)(
+                        sizeof(uint)
+                        + sizeof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct)
+                    ),
             };
             parameters.FetchData.RequiredFileOffset = requiredOffset;
             parameters.FetchData.RequiredLength = requiredLength ?? fileLength;

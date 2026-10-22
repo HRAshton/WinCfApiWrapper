@@ -10,8 +10,7 @@ namespace WinCfApiWrapper.Public.Containers;
 public sealed class TarGZipContainer(
     Func<CancellationToken, Stream> openArchive,
     ArchiveResourceLimits? limits = null
-)
-    : BufferedContainer(limits)
+) : BufferedContainer(limits)
 {
     private readonly Func<CancellationToken, Stream> _openArchive =
         openArchive ?? throw new ArgumentNullException(nameof(openArchive));

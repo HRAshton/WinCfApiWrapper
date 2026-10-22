@@ -13,7 +13,8 @@ public sealed class ZipCatalogTests
     public void Constructor_NullSource_ThrowsArgumentNullException()
     {
         ArgumentNullException error = Assert.Throws<ArgumentNullException>(() =>
-            new ZipCatalog(null!, maxEntries: 1));
+            new ZipCatalog(null!, maxEntries: 1)
+        );
 
         Assert.Equal("stream", error.ParamName);
     }
@@ -97,7 +98,12 @@ public sealed class ZipCatalogTests
         using (MemoryStream accepted = BuildArchive(name + suffix))
         {
             var catalog = new ZipCatalog(accepted, maxEntries: 1);
-            Assert.Equal(1, directory ? catalog.Directories.Count(d => d == name.Replace('/', '\\')) : catalog.Entries.Count);
+            Assert.Equal(
+                1,
+                directory
+                    ? catalog.Directories.Count(d => d == name.Replace('/', '\\'))
+                    : catalog.Entries.Count
+            );
         }
 
         using MemoryStream rejected = BuildArchive(name + "y" + suffix);
@@ -252,12 +258,10 @@ public sealed class ZipCatalogTests
     )
     {
         int end = original.Length - 22;
-        int central = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
-            original.AsSpan(end + 16)
-        ));
-        int nameLength = BinaryPrimitives.ReadUInt16LittleEndian(
-            original.AsSpan(central + 28)
+        int central = checked(
+            (int)BinaryPrimitives.ReadUInt32LittleEndian(original.AsSpan(end + 16))
         );
+        int nameLength = BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(central + 28));
         Assert.Equal(0, BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(central + 30)));
         Assert.Equal(0, BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(central + 32)));
         Assert.Equal(end, central + 46 + nameLength);
@@ -270,6 +274,7 @@ public sealed class ZipCatalogTests
         if (extraBytes != 0)
         {
             Assert.True(extraBytes >= 4);
+
             // A well-formed optional extra field: header ID, payload length, bytes.
             BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(end), 0xCAFE);
             BinaryPrimitives.WriteUInt16LittleEndian(
@@ -277,6 +282,7 @@ public sealed class ZipCatalogTests
                 (ushort)(extraBytes - 4)
             );
         }
+
         result.AsSpan(end + extraBytes, commentBytes).Fill((byte)'C');
         BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(central + 30), extraBytes);
         BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(central + 32), commentBytes);

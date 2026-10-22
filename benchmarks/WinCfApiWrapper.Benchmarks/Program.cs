@@ -17,7 +17,9 @@ internal static class Program
     {
         if (args.Contains("--help"))
         {
-            Console.WriteLine("Options: --entries N --bytes-per-file N --random-reads N --files-per-directory N --resume-probe-passes N --repeat-hydrations N --archive ZIP --http-url URL --work-parent DIR --output JSON");
+            Console.WriteLine(
+                "Options: --entries N --bytes-per-file N --random-reads N --files-per-directory N --resume-probe-passes N --repeat-hydrations N --archive ZIP --http-url URL --work-parent DIR --output JSON"
+            );
             return 0;
         }
 
@@ -41,7 +43,9 @@ internal static class Program
 
     private static async Task RunAsync(Options options)
     {
-        string parent = Path.GetFullPath(options.WorkParent ?? Path.Combine(Path.GetTempPath(), "WinCfApiWrapper.Benchmarks"));
+        string parent = Path.GetFullPath(
+            options.WorkParent ?? Path.Combine(Path.GetTempPath(), "WinCfApiWrapper.Benchmarks")
+        );
         Directory.CreateDirectory(parent);
         string scratch = Path.Combine(parent, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(scratch);
@@ -59,7 +63,12 @@ internal static class Program
         try
         {
             if (options.Archive is null)
-                GenerateArchive(archivePath, options.Entries, options.BytesPerFile, options.FilesPerDirectory);
+                GenerateArchive(
+                    archivePath,
+                    options.Entries,
+                    options.BytesPerFile,
+                    options.FilesPerDirectory
+                );
             if (!File.Exists(archivePath))
                 throw new FileNotFoundException("Archive not found", archivePath);
 
@@ -67,7 +76,10 @@ internal static class Program
             ZipContainer indexOnly = Container(archivePath, options, client, counts);
             await Measure(
                 "zip-index-only",
-                async () => { _ = await indexOnly.GetEntriesAsync(); },
+                async () =>
+                {
+                    _ = await indexOnly.GetEntriesAsync();
+                },
                 counts,
                 phases
             );
@@ -78,8 +90,10 @@ internal static class Program
             await Measure("cold-mount", () => cold.MountAsync(), counts, phases);
             mountRoot = cold.Root;
             IReadOnlyCollection<ContainerEntry> listing = await original.GetEntriesAsync();
-            string[] files = listing.Where(e => !e.IsDirectory)
-                .Select(e => e.RelativePath).ToArray();
+            string[] files = listing
+                .Where(e => !e.IsDirectory)
+                .Select(e => e.RelativePath)
+                .ToArray();
             if (files.Length == 0)
                 throw new InvalidDataException("Archive contains no files.");
 
@@ -96,11 +110,18 @@ internal static class Program
                     SearchOption.AllDirectories
                 );
                 if (directories.Length == 0)
-                    throw new InvalidOperationException("No directories available for resume probe.");
+                    throw new InvalidOperationException(
+                        "No directories available for resume probe."
+                    );
                 directoryProbes = CompareDirectoryProbes(directories, options.ResumeProbePasses);
             }
 
-            await Measure("random-file-reads", () => RandomReads(cold, files, options.RandomReads), counts, phases);
+            await Measure(
+                "random-file-reads",
+                () => RandomReads(cold, files, options.RandomReads),
+                counts,
+                phases
+            );
             await Measure("hydrate-all", () => cold.HydrateAllAsync(), counts, phases);
             if (options.RepeatHydrations > 0)
             {
@@ -118,14 +139,24 @@ internal static class Program
             active = factory.Open(MountOptions(original, mountBase));
             ICloudMount same = active;
             await Measure("warm-resume-same-container", () => same.MountAsync(), counts, phases);
-            await Measure("dispose-same-container", async () => await same.DisposeAsync(), counts, phases);
+            await Measure(
+                "dispose-same-container",
+                async () => await same.DisposeAsync(),
+                counts,
+                phases
+            );
             active = null;
 
             ZipContainer fresh = Container(archivePath, options, client, counts);
             active = factory.Open(MountOptions(fresh, mountBase));
             ICloudMount changed = active;
             await Measure("warm-resume-new-container", () => changed.MountAsync(), counts, phases);
-            await Measure("dispose-new-container", async () => await changed.DisposeAsync(), counts, phases);
+            await Measure(
+                "dispose-new-container",
+                async () => await changed.DisposeAsync(),
+                counts,
+                phases
+            );
             active = null;
 
             string json = JsonSerializer.Serialize(
@@ -182,7 +213,9 @@ internal static class Program
             }
             catch (Exception error)
             {
-                Console.Error.WriteLine($"Benchmark cleanup: disconnect failed; leaving {scratch}: {error}");
+                Console.Error.WriteLine(
+                    $"Benchmark cleanup: disconnect failed; leaving {scratch}: {error}"
+                );
                 return;
             }
         }
@@ -197,7 +230,9 @@ internal static class Program
         }
         catch (Exception error)
         {
-            Console.Error.WriteLine($"Benchmark cleanup: unregister failed; leaving {scratch}: {error}");
+            Console.Error.WriteLine(
+                $"Benchmark cleanup: unregister failed; leaving {scratch}: {error}"
+            );
             return;
         }
 
@@ -225,13 +260,14 @@ internal static class Program
         );
     }
 
-    private static CloudMountOptions MountOptions(ZipContainer container, string path) => new()
-    {
-        Container = container,
-        Root = path,
-        TrustedContentId = "b17da7a1",
-        SkipResumeValidation = true,
-    };
+    private static CloudMountOptions MountOptions(ZipContainer container, string path) =>
+        new()
+        {
+            Container = container,
+            Root = path,
+            TrustedContentId = "b17da7a1",
+            SkipResumeValidation = true,
+        };
 
     private static ZipContainer Container(
         string path,
@@ -241,7 +277,11 @@ internal static class Program
     )
     {
         if (client is not null)
-            return ZipContainer.FromHttp(client, new Uri(options.HttpUrl!, UriKind.Absolute), validateEntryMetadata: false);
+            return ZipContainer.FromHttp(
+                client,
+                new Uri(options.HttpUrl!, UriKind.Absolute),
+                validateEntryMetadata: false
+            );
 
         return new ZipContainer(
             _ =>
@@ -329,12 +369,14 @@ internal static class Program
                     if (singleProbe)
                     {
                         FileAttributes attributes = File.GetAttributes(path);
-                        valid = (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint))
+                        valid =
+                            (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint))
                             == FileAttributes.Directory;
                     }
                     else
                     {
-                        valid = Directory.Exists(path)
+                        valid =
+                            Directory.Exists(path)
                             && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0;
                     }
 
@@ -343,28 +385,27 @@ internal static class Program
                 }
 
                 clock.Stop();
-                samples.Add(new DirectoryProbeResult(
-                    singleProbe ? "single-get-attributes" : "exists-then-attributes",
-                    pass,
-                    paths.Length,
-                    clock.Elapsed.TotalMilliseconds,
-                    GC.GetTotalAllocatedBytes(precise: true) - allocationStart
-                ));
+                samples.Add(
+                    new DirectoryProbeResult(
+                        singleProbe ? "single-get-attributes" : "exists-then-attributes",
+                        pass,
+                        paths.Length,
+                        clock.Elapsed.TotalMilliseconds,
+                        GC.GetTotalAllocatedBytes(precise: true) - allocationStart
+                    )
+                );
             }
         }
 
         return samples;
     }
 
-    private sealed record DirectoryProbeResult(
-        string Mode,
-        int Pass,
-        int DirectoryCount,
-        double Milliseconds,
-        long AllocatedBytesProcessWide
-    );
-
-    private static void GenerateArchive(string path, int entries, int bytesPerFile, int filesPerDirectory)
+    private static void GenerateArchive(
+        string path,
+        int entries,
+        int bytesPerFile,
+        int filesPerDirectory
+    )
     {
         var content = new byte[bytesPerFile];
         new Random(1234).NextBytes(content);
@@ -380,6 +421,14 @@ internal static class Program
             writer.Write(content);
         }
     }
+
+    private sealed record DirectoryProbeResult(
+        string Mode,
+        int Pass,
+        int DirectoryCount,
+        double Milliseconds,
+        long AllocatedBytesProcessWide
+    );
 
     private readonly record struct Snapshot(
         long FileOpens,
@@ -415,12 +464,13 @@ internal static class Program
 
         public void CountRangeBytes(long size) => Interlocked.Add(ref _rangeBytes, size);
 
-        public Snapshot Capture() => new(
-            Interlocked.Read(ref _fileOpens),
-            Interlocked.Read(ref _fileBytes),
-            Interlocked.Read(ref _rangeRequests),
-            Interlocked.Read(ref _rangeBytes)
-        );
+        public Snapshot Capture() =>
+            new(
+                Interlocked.Read(ref _fileOpens),
+                Interlocked.Read(ref _fileBytes),
+                Interlocked.Read(ref _rangeRequests),
+                Interlocked.Read(ref _rangeBytes)
+            );
     }
 
     private sealed class RangeCounterHandler(HttpMessageHandler inner, Counters counters)
@@ -486,7 +536,9 @@ internal static class Program
         }
 
         public override async ValueTask<int> ReadAsync(
-            Memory<byte> buffer, CancellationToken cancellationToken = default)
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default
+        )
         {
             int read = await inner.ReadAsync(buffer, cancellationToken);
             counters.CountFileBytes(read);
@@ -498,8 +550,7 @@ internal static class Program
             int offset,
             int count,
             CancellationToken cancellationToken
-        ) =>
-            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        ) => ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
         protected override void Dispose(bool disposing)
         {
@@ -524,9 +575,16 @@ internal static class Program
     {
         public static Options Parse(string[] args)
         {
-            int entries = 10000, fileBytes = 1024, reads = 128;
-            int filesPerDirectory = 100, probePasses = 0, repeatHydrations = 0;
-            string? archive = null, url = null, parent = null, output = null;
+            int entries = 10000,
+                fileBytes = 1024,
+                reads = 128;
+            int filesPerDirectory = 100,
+                probePasses = 0,
+                repeatHydrations = 0;
+            string? archive = null,
+                url = null,
+                parent = null,
+                output = null;
             for (int i = 0; i < args.Length; i += 2)
             {
                 if (i + 1 >= args.Length)
@@ -534,24 +592,53 @@ internal static class Program
                 string value = args[i + 1];
                 switch (args[i])
                 {
-                    case "--entries": entries = int.Parse(value); break;
-                    case "--bytes-per-file": fileBytes = int.Parse(value); break;
-                    case "--random-reads": reads = int.Parse(value); break;
-                    case "--files-per-directory": filesPerDirectory = int.Parse(value); break;
-                    case "--resume-probe-passes": probePasses = int.Parse(value); break;
-                    case "--repeat-hydrations": repeatHydrations = int.Parse(value); break;
-                    case "--archive": archive = Path.GetFullPath(value); break;
-                    case "--http-url": url = value; break;
-                    case "--work-parent": parent = value; break;
-                    case "--output": output = value; break;
-                    default: throw new ArgumentException($"Unknown option: {args[i]}");
+                    case "--entries":
+                        entries = int.Parse(value);
+                        break;
+                    case "--bytes-per-file":
+                        fileBytes = int.Parse(value);
+                        break;
+                    case "--random-reads":
+                        reads = int.Parse(value);
+                        break;
+                    case "--files-per-directory":
+                        filesPerDirectory = int.Parse(value);
+                        break;
+                    case "--resume-probe-passes":
+                        probePasses = int.Parse(value);
+                        break;
+                    case "--repeat-hydrations":
+                        repeatHydrations = int.Parse(value);
+                        break;
+                    case "--archive":
+                        archive = Path.GetFullPath(value);
+                        break;
+                    case "--http-url":
+                        url = value;
+                        break;
+                    case "--work-parent":
+                        parent = value;
+                        break;
+                    case "--output":
+                        output = value;
+                        break;
+                    default:
+                        throw new ArgumentException($"Unknown option: {args[i]}");
                 }
             }
 
-            if (entries < 1 || entries > 250000 || fileBytes < 1
-                || fileBytes > 1048576 || reads < 0
-                || filesPerDirectory < 1 || probePasses < 0 || probePasses > 50
-                || repeatHydrations < 0 || repeatHydrations > 1000000)
+            if (
+                entries < 1
+                || entries > 250000
+                || fileBytes < 1
+                || fileBytes > 1048576
+                || reads < 0
+                || filesPerDirectory < 1
+                || probePasses < 0
+                || probePasses > 50
+                || repeatHydrations < 0
+                || repeatHydrations > 1000000
+            )
                 throw new ArgumentOutOfRangeException(nameof(args), "Invalid benchmark size.");
             if (
                 url is not null
@@ -561,10 +648,20 @@ internal static class Program
                     || parsed.Scheme is not ("http" or "https")
                 )
             )
-                throw new ArgumentException("HTTP mode requires --archive and an HTTP(S) URL for the identical ZIP.");
+                throw new ArgumentException(
+                    "HTTP mode requires --archive and an HTTP(S) URL for the identical ZIP."
+                );
             return new Options(
-                entries, fileBytes, reads, filesPerDirectory, probePasses, repeatHydrations,
-                archive, url, parent, output
+                entries,
+                fileBytes,
+                reads,
+                filesPerDirectory,
+                probePasses,
+                repeatHydrations,
+                archive,
+                url,
+                parent,
+                output
             );
         }
     }

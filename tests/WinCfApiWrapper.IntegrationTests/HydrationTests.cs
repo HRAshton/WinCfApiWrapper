@@ -37,14 +37,20 @@ public sealed class HydrationTests
                 int afterHydration = opens;
                 unavailable = true;
                 await mount.HydrateAsync("docs/hello.txt", token);
-                Assert.Equal("Hello from a checked-in ZIP fixture!\n", await File.ReadAllTextAsync(mount.Resolve("docs/hello.txt"), token));
+                Assert.Equal(
+                    "Hello from a checked-in ZIP fixture!\n",
+                    await File.ReadAllTextAsync(mount.Resolve("docs/hello.txt"), token)
+                );
                 Assert.Equal(afterHydration, opens);
             }
 
             int beforeResume = opens;
             await using var resumed = new CloudMount(options);
             await resumed.MountAsync(token);
-            Assert.Equal("Hello from a checked-in ZIP fixture!\n", await File.ReadAllTextAsync(resumed.Resolve("docs/hello.txt"), token));
+            Assert.Equal(
+                "Hello from a checked-in ZIP fixture!\n",
+                await File.ReadAllTextAsync(resumed.Resolve("docs/hello.txt"), token)
+            );
             Assert.Equal(beforeResume, opens);
         }
         finally
@@ -100,38 +106,6 @@ public sealed class HydrationTests
         }
     }
 
-    [System.Runtime.CompilerServices.MethodImpl(
-        System.Runtime.CompilerServices.MethodImplOptions.NoInlining
-    )]
-    private static async Task<(string Root, WeakReference<CloudMount> Mount)> OpenOrphanedMountAsync(
-        CancellationToken token
-    )
-    {
-        var mount = new CloudMount(
-            new CloudMountOptions
-            {
-                Container = new ZipContainer(
-                    _ => File.OpenRead(FixtureArchive.LocalPath),
-                    validateEntryMetadata: false
-                ),
-                Root = FixtureArchive.Root(),
-                TrustedContentId = "a11ce123",
-                SkipResumeValidation = true,
-            }
-        );
-
-        try
-        {
-            await mount.MountAsync(token);
-            return (mount.Root, new WeakReference<CloudMount>(mount));
-        }
-        catch
-        {
-            await mount.DisposeAsync();
-            throw;
-        }
-    }
-
     [Fact]
     public async Task HydrateAllAsync_AllFilesBecomeReadable()
     {
@@ -170,6 +144,39 @@ public sealed class HydrationTests
             await mount.DisposeAsync();
             if (registered)
                 FixtureArchive.CleanupRoot(root);
+        }
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(
+        System.Runtime.CompilerServices.MethodImplOptions.NoInlining
+    )]
+    private static async Task<(
+        string Root,
+        WeakReference<CloudMount> Mount
+    )> OpenOrphanedMountAsync(CancellationToken token)
+    {
+        var mount = new CloudMount(
+            new CloudMountOptions
+            {
+                Container = new ZipContainer(
+                    _ => File.OpenRead(FixtureArchive.LocalPath),
+                    validateEntryMetadata: false
+                ),
+                Root = FixtureArchive.Root(),
+                TrustedContentId = "a11ce123",
+                SkipResumeValidation = true,
+            }
+        );
+
+        try
+        {
+            await mount.MountAsync(token);
+            return (mount.Root, new WeakReference<CloudMount>(mount));
+        }
+        catch
+        {
+            await mount.DisposeAsync();
+            throw;
         }
     }
 }

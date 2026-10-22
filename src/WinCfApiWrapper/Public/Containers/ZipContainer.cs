@@ -76,11 +76,12 @@ public sealed class ZipContainer(
         try
         {
             _catalog ??= await Task.Run(
-                    () => new ZipCatalog(
-                        _source.OpenRead(cancellationToken),
-                        _limits.MaxEntries,
-                        _limits.MaxCentralDirectoryMetadataBytes
-                    ),
+                    () =>
+                        new ZipCatalog(
+                            _source.OpenRead(cancellationToken),
+                            _limits.MaxEntries,
+                            _limits.MaxCentralDirectoryMetadataBytes
+                        ),
                     cancellationToken
                 )
                 .ConfigureAwait(false);

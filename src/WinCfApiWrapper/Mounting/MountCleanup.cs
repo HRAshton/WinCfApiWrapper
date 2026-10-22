@@ -74,7 +74,7 @@ internal static class MountCleanup
         FileAttributes beforeMarker = File.GetAttributes(root);
         if (
             (beforeMarker & (FileAttributes.Directory | FileAttributes.ReparsePoint))
-                != FileAttributes.Directory
+            != FileAttributes.Directory
         )
             throw new IOException($"Mount path changed during ownership validation: {root}");
 
@@ -89,7 +89,7 @@ internal static class MountCleanup
         FileAttributes currentAttributes = File.GetAttributes(root);
         if (
             (currentAttributes & (FileAttributes.Directory | FileAttributes.ReparsePoint))
-                != FileAttributes.Directory
+            != FileAttributes.Directory
         )
             throw new IOException($"Mount path changed during cleanup: {root}");
 
@@ -116,8 +116,7 @@ internal static class MountCleanup
 
     // Sidecar lies *outside* the directory being recursively deleted:
     // a failed Directory.Delete may already have removed some child files.
-    private static string PendingMarkerPath(string root) =>
-        root + PendingCleanupMarkerSuffix;
+    private static string PendingMarkerPath(string root) => root + PendingCleanupMarkerSuffix;
 
     private static bool HasPendingCleanupMarker(string root)
     {

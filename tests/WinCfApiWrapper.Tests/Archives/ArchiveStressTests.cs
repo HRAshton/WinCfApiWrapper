@@ -35,7 +35,10 @@ public sealed class ArchiveStressTests
         Assert.Equal(fileCount, entries.Count);
         Assert.Contains(entries, entry => entry.RelativePath == "file-199999.txt");
         ContainerEntry last = entries.Single(entry => entry.RelativePath == "file-199999.txt");
-        await using Stream opened = await container.OpenReadAsync(last, TestContext.Current.CancellationToken);
+        await using Stream opened = await container.OpenReadAsync(
+            last,
+            TestContext.Current.CancellationToken
+        );
         Assert.Equal(-1, opened.ReadByte());
     }
 }

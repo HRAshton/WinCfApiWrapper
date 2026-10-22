@@ -31,7 +31,10 @@ public sealed record ArchiveResourceLimits
         if (effective.MaxEntries <= 0)
             throw new ArgumentOutOfRangeException(nameof(limits), "MaxEntries must be positive.");
         if (effective.MaxBufferedBytes <= 0)
-            throw new ArgumentOutOfRangeException(nameof(limits), "MaxBufferedBytes must be positive.");
+            throw new ArgumentOutOfRangeException(
+                nameof(limits),
+                "MaxBufferedBytes must be positive."
+            );
         if (effective.MaxCentralDirectoryMetadataBytes is <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -39,6 +42,7 @@ public sealed record ArchiveResourceLimits
                 "MaxCentralDirectoryMetadataBytes must be positive when provided."
             );
         }
+
         return effective;
     }
 }

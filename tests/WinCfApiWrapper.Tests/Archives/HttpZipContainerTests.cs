@@ -53,9 +53,7 @@ public sealed class HttpZipContainerTests
             rangeReadTimeout: TimeSpan.FromMilliseconds(200)
         );
         CancellationToken token = TestContext.Current.CancellationToken;
-        await Assert.ThrowsAsync<TimeoutException>(() =>
-            container.GetEntriesAsync(token).AsTask()
-        );
+        await Assert.ThrowsAsync<TimeoutException>(() => container.GetEntriesAsync(token).AsTask());
 
         ContainerEntry entry = Assert.Single(await container.GetEntriesAsync(token));
         Assert.Equal("file-0.bin", entry.RelativePath);
@@ -80,7 +78,10 @@ public sealed class HttpZipContainerTests
             input.ReadAsync(data.AsMemory(), TestContext.Current.CancellationToken).AsTask()
         );
         Assert.Equal(0, input.Position);
-        Assert.Equal(4, await input.ReadAsync(data.AsMemory(), TestContext.Current.CancellationToken));
+        Assert.Equal(
+            4,
+            await input.ReadAsync(data.AsMemory(), TestContext.Current.CancellationToken)
+        );
         Assert.Equal(responses.Archive[..4], data);
         Assert.Equal(1, responses.ProbeCount);
     }
@@ -93,8 +94,10 @@ public sealed class HttpZipContainerTests
         int remainingStalls = 1;
         responses.TransformResponse = response =>
         {
-            if (response.Content.Headers.ContentRange!.To == 0 ||
-                Interlocked.Exchange(ref remainingStalls, 0) == 0)
+            if (
+                response.Content.Headers.ContentRange!.To == 0
+                || Interlocked.Exchange(ref remainingStalls, 0) == 0
+            )
                 return;
 
             ContentRangeHeaderValue range = response.Content.Headers.ContentRange!;
@@ -115,7 +118,10 @@ public sealed class HttpZipContainerTests
             input.ReadAsync(data.AsMemory(), TestContext.Current.CancellationToken).AsTask()
         );
         Assert.Equal(0, input.Position);
-        Assert.Equal(4, await input.ReadAsync(data.AsMemory(), TestContext.Current.CancellationToken));
+        Assert.Equal(
+            4,
+            await input.ReadAsync(data.AsMemory(), TestContext.Current.CancellationToken)
+        );
         Assert.Equal(responses.Archive[..4], data);
         Assert.Equal(1, responses.ProbeCount);
     }
@@ -162,7 +168,9 @@ public sealed class HttpZipContainerTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task RangeDeadline_CallerCancellationRemainsCancellationNotTimeout(bool withDeadline)
+    public async Task RangeDeadline_CallerCancellationRemainsCancellationNotTimeout(
+        bool withDeadline
+    )
     {
         using var responses = new RangeHandler(BuildArchive([1, 2, 3], 1));
         using var handler = new OnceStalledRangeHandler(responses, stallRange: true);
@@ -177,7 +185,10 @@ public sealed class HttpZipContainerTests
             TestContext.Current.CancellationToken
         );
         Task<int> pending = input.ReadAsync(new byte[4].AsMemory(), cancel.Token).AsTask();
-        await handler.Stalled.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await handler.Stalled.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken
+        );
         cancel.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
@@ -241,9 +252,8 @@ public sealed class HttpZipContainerTests
             + BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(26))
             + BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(28));
         changed[dataOffset] ^= 0xff;
-        int directoryOffset = (int)BinaryPrimitives.ReadUInt32LittleEndian(
-            original.AsSpan(original.Length - 6)
-        );
+        int directoryOffset = (int)
+            BinaryPrimitives.ReadUInt32LittleEndian(original.AsSpan(original.Length - 6));
         Assert.Equal(original[directoryOffset..], changed[directoryOffset..]);
         DateTimeOffset modified = new(2026, 10, 19, 12, 0, 0, TimeSpan.Zero);
         using var handler = new RangeHandler(original)
@@ -820,9 +830,8 @@ public sealed class HttpZipContainerTests
         private int _probeAttempts;
         private int _rangeAttempts;
 
-        public TaskCompletionSource Stalled { get; } = new(
-            TaskCreationOptions.RunContinuationsAsynchronously
-        );
+        public TaskCompletionSource Stalled { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -881,14 +890,12 @@ public sealed class HttpZipContainerTests
         public override long Seek(long offset, SeekOrigin origin) =>
             throw new NotSupportedException();
 
-        public override void SetLength(long value) =>
-            throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
 
         public override void Write(byte[] buffer, int offset, int count) =>
             throw new NotSupportedException();
 
-        public override void Flush() =>
-            throw new NotSupportedException();
+        public override void Flush() => throw new NotSupportedException();
     }
 
     private sealed class NonPumpingContext : SynchronizationContext

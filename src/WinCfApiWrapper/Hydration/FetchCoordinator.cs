@@ -16,9 +16,13 @@ internal sealed class FetchCoordinator : IAsyncDisposable
     // values remain usable if the required range fields are present.
     private static readonly uint MinimumFetchDataSize = (uint)(
         sizeof(uint)
-        + Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
-            nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength)
-        ).ToInt32()
+        + Marshal
+            .OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+                nameof(
+                    CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength
+                )
+            )
+            .ToInt32()
         + sizeof(long)
     );
 
@@ -162,12 +166,7 @@ internal sealed class FetchCoordinator : IAsyncDisposable
                 return;
             }
 
-            var request = new FetchRequest(
-                info,
-                requiredOffset,
-                requiredLength,
-                name
-            );
+            var request = new FetchRequest(info, requiredOffset, requiredLength, name);
             bool added = Volatile.Read(ref _stopping) == 0 && _requests.TryAdd(request, 0);
             switch (added)
             {

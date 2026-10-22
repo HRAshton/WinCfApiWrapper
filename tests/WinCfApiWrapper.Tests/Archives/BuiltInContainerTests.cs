@@ -108,8 +108,8 @@ public sealed class BuiltInContainerTests
     [Fact]
     public void TarContainer_NullArchiveFactory_IsRejected()
     {
-        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => new TarContainer(null!)
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(() =>
+            new TarContainer(null!)
         );
         Assert.Equal("openArchive", exception.ParamName);
     }
@@ -117,8 +117,8 @@ public sealed class BuiltInContainerTests
     [Fact]
     public void TarGZipContainer_NullArchiveFactory_IsRejected()
     {
-        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => new TarGZipContainer(null!)
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(() =>
+            new TarGZipContainer(null!)
         );
         Assert.Equal("openArchive", exception.ParamName);
     }

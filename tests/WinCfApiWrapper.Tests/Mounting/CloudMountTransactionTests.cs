@@ -123,11 +123,12 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public async Task CallbackRoot_IsReleasedWhenConnectFails()
     {
-        var fake = new FakeMountOperations(name =>
+        Action<string> failConnect = name =>
         {
             if (name == "connect")
                 throw new IOException("Injected connection failure.");
-        }, retainCallbacks: false);
+        };
+        var fake = new FakeMountOperations(failConnect, retainCallbacks: false);
         await using CloudMount mount = Open(fake);
 
         await Assert.ThrowsAsync<IOException>(() =>
@@ -141,11 +142,12 @@ public sealed class CloudMountTransactionTests : IDisposable
     public async Task CallbackRoot_SurvivesDisconnectFailureUntilSuccessfulRetry()
     {
         bool rejectDisconnect = true;
-        var fake = new FakeMountOperations(name =>
+        Action<string> failDisconnect = name =>
         {
             if (name == "disconnect" && rejectDisconnect)
                 throw new IOException("Injected disconnect failure.");
-        }, retainCallbacks: false);
+        };
+        var fake = new FakeMountOperations(failDisconnect, retainCallbacks: false);
         CloudMount mount = Open(fake);
         try
         {
@@ -192,18 +194,6 @@ public sealed class CloudMountTransactionTests : IDisposable
         }
 
         Assert.False(recovered.CallbacksRooted);
-    }
-
-    [System.Runtime.CompilerServices.MethodImpl(
-        System.Runtime.CompilerServices.MethodImplOptions.NoInlining
-    )]
-    private async Task<WeakReference<CloudMount>> OpenWithoutRetainingMountAsync(
-        FakeMountOperations fake
-    )
-    {
-        CloudMount mount = Open(fake);
-        await mount.MountAsync(TestContext.Current.CancellationToken);
-        return new WeakReference<CloudMount>(mount);
     }
 
     [Fact]
@@ -477,7 +467,9 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task TrustedResume_MissingOrReplacedDirectory_RejectsBeforeConnecting(bool replacedWithFile)
+    public async Task TrustedResume_MissingOrReplacedDirectory_RejectsBeforeConnecting(
+        bool replacedWithFile
+    )
     {
         var fake = new FakeMountOperations();
         string parent = Path.Combine(_scratch, Guid.NewGuid().ToString("N"));
@@ -527,12 +519,14 @@ public sealed class CloudMountTransactionTests : IDisposable
     [Fact]
     public void Open_InvalidShutdownWait_RejectsConfiguration()
     {
-        foreach (TimeSpan timeout in new[]
-        {
-            TimeSpan.Zero,
-            TimeSpan.FromTicks(-1),
-            TimeSpan.FromDays(60),
-        })
+        foreach (
+            TimeSpan timeout in new[]
+            {
+                TimeSpan.Zero,
+                TimeSpan.FromTicks(-1),
+                TimeSpan.FromDays(60),
+            }
+        )
         {
             ArgumentOutOfRangeException error = Assert.Throws<ArgumentOutOfRangeException>(() =>
                 new CloudMount(
@@ -566,10 +560,10 @@ public sealed class CloudMountTransactionTests : IDisposable
 
         // An already-completed drain is safe even if the shutdown budget has
         // expired by the time that drain is observed.
-        await mount.DisposeAsync().AsTask().WaitAsync(
-            TimeSpan.FromSeconds(5),
-            TestContext.Current.CancellationToken
-        );
+        await mount
+            .DisposeAsync()
+            .AsTask()
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.Equal(MountState.Stopped, mount.State);
         Assert.False(mount.CallbacksRooted);
@@ -935,8 +929,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         Assert.Equal(
             2,
             logger.Entries.Count(entry =>
-                entry.Level == LogLevel.Warning
-                && entry.Exception is InvalidOperationException
+                entry.Level == LogLevel.Warning && entry.Exception is InvalidOperationException
             )
         );
     }
@@ -977,8 +970,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         Assert.Equal(
             2,
             logger.Entries.Count(entry =>
-                entry.Level == LogLevel.Warning
-                && entry.Exception is InvalidOperationException
+                entry.Level == LogLevel.Warning && entry.Exception is InvalidOperationException
             )
         );
     }
@@ -1010,9 +1002,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         Assert.True(progress.Reports > 0);
         Assert.Contains(
             logger.Entries,
-            entry =>
-                entry.Level == LogLevel.Warning
-                && entry.Exception is InvalidOperationException
+            entry => entry.Level == LogLevel.Warning && entry.Exception is InvalidOperationException
         );
     }
 
@@ -1313,8 +1303,8 @@ public sealed class CloudMountTransactionTests : IDisposable
     public async Task Hydrate_FailedNativeOperation_DoesNotRetainFileLock()
     {
         CancellationToken token = TestContext.Current.CancellationToken;
-        var fake = new FakeMountOperations(
-            afterHydrate: () => throw new IOException("injected hydration failure")
+        var fake = new FakeMountOperations(afterHydrate: () =>
+            throw new IOException("injected hydration failure")
         );
         await using var mount = Open(fake);
         await mount.MountAsync(token);
@@ -1527,6 +1517,18 @@ public sealed class CloudMountTransactionTests : IDisposable
         MountCleanup.Delete(Root, fake);
         Assert.False(Directory.Exists(Root));
         Assert.False(File.Exists(Root + ".wincfapiwrapper-pending-cleanup"));
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(
+        System.Runtime.CompilerServices.MethodImplOptions.NoInlining
+    )]
+    private async Task<WeakReference<CloudMount>> OpenWithoutRetainingMountAsync(
+        FakeMountOperations fake
+    )
+    {
+        CloudMount mount = Open(fake);
+        await mount.MountAsync(TestContext.Current.CancellationToken);
+        return new WeakReference<CloudMount>(mount);
     }
 
     private static unsafe void SimulateFetch(FakeMountOperations fake)
