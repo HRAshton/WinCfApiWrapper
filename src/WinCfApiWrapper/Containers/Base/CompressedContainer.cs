@@ -57,7 +57,9 @@ public abstract class CompressedContainer : BufferedContainer
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (read > Limits.MaxBufferedBytes - content.Length)
-                throw new InvalidDataException("Compressed content exceeds maximum buffered byte count.");
+                throw new InvalidDataException(
+                    "Compressed content exceeds maximum buffered byte count."
+                );
             content.Write(buffer, 0, read);
         }
 

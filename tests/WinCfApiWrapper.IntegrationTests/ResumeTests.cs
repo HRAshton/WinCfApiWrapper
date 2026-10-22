@@ -41,32 +41,40 @@ public sealed class ResumeTests
             Directory.CreateDirectory(legacyRoot);
             File.WriteAllText(Path.Combine(legacyRoot, "keep.txt"), "legacy");
 
-            await using (var first = new CloudMount(new CloudMountOptions
-            {
-                Root = baseRoot,
-                Container = new ZipContainer(_ => File.OpenRead(archiveA)),
-            }))
+            await using (
+                var first = new CloudMount(
+                    new CloudMountOptions
+                    {
+                        Root = baseRoot,
+                        Container = new ZipContainer(_ => File.OpenRead(archiveA)),
+                    }
+                )
+            )
             {
                 await first.MountAsync(token);
                 firstRoot = first.Root;
                 Assert.Equal(
-                    BitConverter.GetBytes((ulong)37806),
+                    BitConverter.GetBytes(37806UL),
                     await File.ReadAllBytesAsync(first.Resolve("file.txt"), token)
                 );
             }
 
-            await using (var second = new CloudMount(new CloudMountOptions
-            {
-                Root = baseRoot,
-                Container = new ZipContainer(_ => File.OpenRead(archiveB)),
-            }))
+            await using (
+                var second = new CloudMount(
+                    new CloudMountOptions
+                    {
+                        Root = baseRoot,
+                        Container = new ZipContainer(_ => File.OpenRead(archiveB)),
+                    }
+                )
+            )
             {
                 await second.MountAsync(token);
                 secondRoot = second.Root;
                 Assert.NotEqual(firstRoot, secondRoot);
                 Assert.StartsWith(baseRoot + ".rzm-v2-", secondRoot);
                 Assert.Equal(
-                    BitConverter.GetBytes((ulong)58888),
+                    BitConverter.GetBytes(58888UL),
                     await File.ReadAllBytesAsync(second.Resolve("file.txt"), token)
                 );
             }
@@ -74,7 +82,7 @@ public sealed class ResumeTests
             // Archive A remains hydrated in its own directory. The legacy
             // 32-bit path is neither resumed nor automatically deleted.
             Assert.Equal(
-                BitConverter.GetBytes((ulong)37806),
+                BitConverter.GetBytes(37806UL),
                 await File.ReadAllBytesAsync(Path.Combine(firstRoot!, "file.txt"), token)
             );
             Assert.Equal("legacy", File.ReadAllText(Path.Combine(legacyRoot, "keep.txt")));

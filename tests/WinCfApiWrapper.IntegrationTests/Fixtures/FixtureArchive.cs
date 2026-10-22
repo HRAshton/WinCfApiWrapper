@@ -21,7 +21,10 @@ internal static class FixtureArchive
 
     public static string MountedRoot(string baseRoot)
     {
-        var catalog = new ZipCatalog(File.OpenRead(LocalPath), new ArchiveResourceLimits().MaxEntries);
+        var catalog = new ZipCatalog(
+            File.OpenRead(LocalPath),
+            new ArchiveResourceLimits().MaxEntries
+        );
 
         return MountPath.For(baseRoot, catalog.Fingerprint);
     }

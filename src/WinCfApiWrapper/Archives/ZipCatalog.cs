@@ -15,13 +15,12 @@ internal sealed class ZipCatalog
 
     private string? _fingerprint;
 
-    public ZipCatalog(
-        Stream stream,
-        int maxEntries,
-        long? maxCentralDirectoryMetadataBytes = null
-    )
+    public ZipCatalog(Stream stream, int maxEntries, long? maxCentralDirectoryMetadataBytes = null)
     {
-        using Stream ownedStream = new BufferedStream(stream ?? throw new ArgumentNullException(nameof(stream)), 64 * 1024);
+        using Stream ownedStream = new BufferedStream(
+            stream ?? throw new ArgumentNullException(nameof(stream)),
+            64 * 1024
+        );
         if (maxEntries <= 0)
             throw new ArgumentOutOfRangeException(nameof(maxEntries));
         if (maxCentralDirectoryMetadataBytes is <= 0)
@@ -34,6 +33,7 @@ internal sealed class ZipCatalog
         {
             if (++count > maxEntries)
                 throw new InvalidDataException("ZIP archive exceeds maximum entry count.");
+
             // Only configured untrusted-input budgets add accounting; trusted
             // indexing retains the original uncapped record-reading path.
             long? remaining = null;
@@ -116,8 +116,6 @@ internal sealed class ZipCatalog
                 .Append('\n');
         }
 
-        return Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(manifest.ToString()))
-        );
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest.ToString())));
     }
 }

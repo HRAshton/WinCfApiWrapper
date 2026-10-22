@@ -28,7 +28,10 @@ public sealed class InputBoundaryProperties
         Assert.True(
             normalized.Length == 0
                 ? string.Equals(root, resolved, StringComparison.OrdinalIgnoreCase)
-                : resolved.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
+                : resolved.StartsWith(
+                    root + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase
+                ),
             $"Accepted path escaped its root: {input.Get}"
         );
     }
@@ -37,11 +40,17 @@ public sealed class InputBoundaryProperties
     public void TraversalPaths_AreRejected(NonNull<string> suffix)
     {
         Assert.Throws<InvalidDataException>(() => ContainerPath.Normalize("../" + suffix.Get));
-        Assert.Throws<InvalidDataException>(() => ContainerPath.Normalize("folder\\..\\" + suffix.Get));
+        Assert.Throws<InvalidDataException>(() =>
+            ContainerPath.Normalize("folder\\..\\" + suffix.Get)
+        );
     }
 
     [Property(MaxTest = 1000)]
-    public void ValidRequests_ExpandToAlignedRangeWithinFile(long fileSeed, long offsetSeed, long lengthSeed)
+    public void ValidRequests_ExpandToAlignedRangeWithinFile(
+        long fileSeed,
+        long offsetSeed,
+        long lengthSeed
+    )
     {
         long fileLength = (long)((ulong)fileSeed % long.MaxValue) + 1;
         long offset = (long)((ulong)offsetSeed % (ulong)fileLength);
@@ -60,12 +69,16 @@ public sealed class InputBoundaryProperties
     public void InvalidRequests_AreRejected(long offset, long length, long fileLength)
     {
         // Use decimal arithmetic to check validity without overflowing.
-        bool valid = fileLength > 0 && offset >= 0 && length > 0
-            && (decimal)offset + length <= fileLength;
+        bool valid =
+            fileLength > 0 && offset >= 0 && length > 0 && (decimal)offset + length <= fileLength;
         if (!valid)
         {
-            Assert.Throws<InvalidDataException>(() => TransferRange.ForRequest(offset, length, fileLength));
-            Assert.Throws<InvalidDataException>(() => TransferRange.ValidateExact(offset, length, fileLength));
+            Assert.Throws<InvalidDataException>(() =>
+                TransferRange.ForRequest(offset, length, fileLength)
+            );
+            Assert.Throws<InvalidDataException>(() =>
+                TransferRange.ValidateExact(offset, length, fileLength)
+            );
         }
     }
 }

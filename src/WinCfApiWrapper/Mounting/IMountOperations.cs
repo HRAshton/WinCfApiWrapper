@@ -61,6 +61,8 @@ internal interface IMountOperations
     /// Verifies the registered root is attributed to this Cloud Files provider.
     /// Called during explicit cleanup only; a suffix alone is not ownership evidence.
     /// </summary>
+    /// <param name="root">The full path of the registered sync root.</param>
+    /// <returns><see langword="true" /> when the registration is owned by this provider; otherwise, <see langword="false" />.</returns>
     bool IsOwnedSyncRoot(string root);
 
     /// <summary>

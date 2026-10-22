@@ -46,8 +46,12 @@ public sealed class ArchiveCompatibilityTests
     [Fact]
     public void CompressedSubclass_RejectsMissingFactoryAndEmptyName()
     {
-        Assert.Throws<ArgumentNullException>(() => new LegacyCompressedContainer(null!, "file.txt"));
-        Assert.Throws<ArgumentException>(() => new LegacyCompressedContainer(_ => new MemoryStream(), string.Empty));
+        Assert.Throws<ArgumentNullException>(() =>
+            new LegacyCompressedContainer(null!, "file.txt")
+        );
+        Assert.Throws<ArgumentException>(() =>
+            new LegacyCompressedContainer(_ => new MemoryStream(), string.Empty)
+        );
     }
 
     [Fact]

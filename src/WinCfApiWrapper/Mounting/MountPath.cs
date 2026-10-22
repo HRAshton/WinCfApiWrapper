@@ -15,8 +15,8 @@ internal static class MountPath
         string suffix = fingerprint.Length switch
         {
             8 when isHex => LegacyMarker + fingerprint.ToLowerInvariant(),
-            64 when isHex =>
-                AutomaticV2Marker + fingerprint[..AutomaticV2HexDigits].ToLowerInvariant(),
+            64 when isHex => AutomaticV2Marker
+                + fingerprint[..AutomaticV2HexDigits].ToLowerInvariant(),
             _ => throw new ArgumentException(
                 "Expected an eight-digit trusted ID or 64-digit automatic SHA-256 fingerprint.",
                 nameof(fingerprint)
@@ -37,8 +37,6 @@ internal static class MountPath
         int position = name.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
         return position > 0
             && name.Length - position - marker.Length == hexDigits
-            && name.AsSpan(position + marker.Length).IndexOfAnyExcept(
-                "0123456789ABCDEFabcdef"
-            ) < 0;
+            && name.AsSpan(position + marker.Length).IndexOfAnyExcept("0123456789ABCDEFabcdef") < 0;
     }
 }

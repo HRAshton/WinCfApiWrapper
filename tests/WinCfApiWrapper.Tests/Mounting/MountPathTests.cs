@@ -32,7 +32,9 @@ public sealed class MountPathTests
     public void LegacyAutomaticFolder_StillRecognizedForExplicitCleanup()
     {
         string parent = Path.Combine(
-            Path.GetTempPath(), "WinCfApiWrapper.Unit", Guid.NewGuid().ToString("N")
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
         );
         Directory.CreateDirectory(parent);
         try
@@ -56,11 +58,13 @@ public sealed class MountPathTests
         static string Fingerprint(ulong value)
         {
             using var memory = new MemoryStream();
-            using (var archive = new System.IO.Compression.ZipArchive(
-                memory,
-                System.IO.Compression.ZipArchiveMode.Create,
-                leaveOpen: true
-            ))
+            using (
+                var archive = new System.IO.Compression.ZipArchive(
+                    memory,
+                    System.IO.Compression.ZipArchiveMode.Create,
+                    leaveOpen: true
+                )
+            )
             {
                 using Stream entry = archive
                     .CreateEntry("file.txt", System.IO.Compression.CompressionLevel.NoCompression)
@@ -337,10 +341,7 @@ public sealed class MountPathTests
         try
         {
             File.WriteAllText(Path.Combine(root, "keep.txt"), "foreign");
-            var fake = new FakeMountOperations(registered: true)
-            {
-                OwnsRegistration = false,
-            };
+            var fake = new FakeMountOperations(registered: true) { OwnsRegistration = false };
 
             Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
             Assert.True(fake.Registered);
@@ -455,27 +456,6 @@ public sealed class MountPathTests
         }
     }
 
-    private static void CreateJunction(string link, string target)
-    {
-        var start = new System.Diagnostics.ProcessStartInfo("cmd.exe")
-        {
-            Arguments = $"/d /c mklink /J \"{link}\" \"{target}\"",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        using System.Diagnostics.Process process = System.Diagnostics.Process.Start(start)!;
-        try
-        {
-            Assert.True(process.WaitForExit(5000), "Creating directory junction timed out.");
-            Assert.Equal(0, process.ExitCode);
-        }
-        finally
-        {
-            if (!process.HasExited)
-                process.Kill(entireProcessTree: true);
-        }
-    }
-
     [Fact]
     public void CleanupRejectsUnmarkedFolder()
     {
@@ -545,6 +525,27 @@ public sealed class MountPathTests
         finally
         {
             Directory.Delete(parent, true);
+        }
+    }
+
+    private static void CreateJunction(string link, string target)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+        {
+            Arguments = $"/d /c mklink /J \"{link}\" \"{target}\"",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        using System.Diagnostics.Process process = System.Diagnostics.Process.Start(start)!;
+        try
+        {
+            Assert.True(process.WaitForExit(5000), "Creating directory junction timed out.");
+            Assert.Equal(0, process.ExitCode);
+        }
+        finally
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
         }
     }
 }

@@ -395,6 +395,29 @@ internal sealed class CloudMount : ICloudMount
         }
     }
 
+    // Query metadata only once per directory while retaining all existing
+    // ancestor and reparse checks. Missing/inaccessible paths remain invalid.
+    internal static bool IsValidResumeDirectory(string path)
+    {
+        try
+        {
+            FileAttributes attributes = File.GetAttributes(path);
+            return (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint))
+                == FileAttributes.Directory;
+        }
+        catch (Exception ex)
+            when (ex
+                    is IOException
+                        or UnauthorizedAccessException
+                        or System.Security.SecurityException
+                        or ArgumentException
+                        or NotSupportedException
+            )
+        {
+            return false;
+        }
+    }
+
     private void SetupNative(CancellationToken ct)
     {
         ContainerCatalog catalog = _catalog!;
@@ -487,6 +510,7 @@ internal sealed class CloudMount : ICloudMount
             },
             new() { Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_NONE, Callback = null! },
         ];
+
         // CFAPI retains unmanaged callback pointers, not managed delegate references.
         // Root the mount (and its delegates/coordinator) before native connection setup.
         // The root is released only after a successful native disconnect.
@@ -529,35 +553,18 @@ internal sealed class CloudMount : ICloudMount
         }
     }
 
-    // Query metadata only once per directory while retaining all existing
-    // ancestor and reparse checks. Missing/inaccessible paths remain invalid.
-    internal static bool IsValidResumeDirectory(string path)
-    {
-        try
-        {
-            FileAttributes attributes = File.GetAttributes(path);
-            return (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint))
-                == FileAttributes.Directory;
-        }
-        catch (Exception ex) when (
-            ex is IOException
-                or UnauthorizedAccessException
-                or System.Security.SecurityException
-                or ArgumentException
-                or NotSupportedException
-        )
-        {
-            return false;
-        }
-    }
-
     private void RollbackNew(List<Exception> errors)
     {
         if (_rootCreatedByAttempt)
         {
             try
             {
-                MountCleanup.Delete(Root, _operations, _registrationFailed, createdByThisAttempt: true);
+                MountCleanup.Delete(
+                    Root,
+                    _operations,
+                    _registrationFailed,
+                    createdByThisAttempt: true
+                );
             }
             catch (Exception ex)
             {
@@ -680,13 +687,6 @@ internal sealed class CloudMount : ICloudMount
         return operation;
     }
 
-    private sealed class FileHydrationSlot
-    {
-        public SemaphoreSlim Semaphore { get; } = new(1);
-
-        public int Users { get; set; }
-    }
-
     private async Task HydrateCoreAsync(
         string name,
         CancellationToken token,
@@ -775,20 +775,18 @@ internal sealed class CloudMount : ICloudMount
         if (_coordinator is not null)
         {
             await AwaitShutdownDrainAsync(
-                _coordinator.DisposeAsync().AsTask(),
-                elapsed,
-                "fetch workers"
-            ).ConfigureAwait(false);
+                    _coordinator.DisposeAsync().AsTask(),
+                    elapsed,
+                    "fetch workers"
+                )
+                .ConfigureAwait(false);
         }
 
         Task explicitDrain = Task.WhenAll(active);
         try
         {
-            await AwaitShutdownDrainAsync(
-                explicitDrain,
-                elapsed,
-                "explicit hydrations"
-            ).ConfigureAwait(false);
+            await AwaitShutdownDrainAsync(explicitDrain, elapsed, "explicit hydrations")
+                .ConfigureAwait(false);
         }
         catch (TimeoutException) when (!explicitDrain.IsCompleted)
         {
@@ -853,5 +851,12 @@ internal sealed class CloudMount : ICloudMount
                 ex
             );
         }
+    }
+
+    private sealed class FileHydrationSlot
+    {
+        public SemaphoreSlim Semaphore { get; } = new(1);
+
+        public int Users { get; set; }
     }
 }

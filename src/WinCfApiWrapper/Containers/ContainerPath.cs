@@ -67,9 +67,7 @@ internal static class ContainerPath
         HashSet<string> directories
     )
     {
-        int length = isDirectory
-            ? normalizedPath.Length
-            : normalizedPath.LastIndexOf('\\');
+        int length = isDirectory ? normalizedPath.Length : normalizedPath.LastIndexOf('\\');
         while (length > 0)
         {
             string parent = normalizedPath[..length];

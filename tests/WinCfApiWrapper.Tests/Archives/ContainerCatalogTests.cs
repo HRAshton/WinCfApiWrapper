@@ -111,7 +111,12 @@ public sealed class ContainerCatalogTests
             [new ContainerEntry(boundary, 0, version, directory)],
             "1234abcd"
         );
-        Assert.Equal(1, directory ? accepted.Directories.Count(d => d == boundary.Replace('/', '\\')) : accepted.Entries.Count);
+        Assert.Equal(
+            1,
+            directory
+                ? accepted.Directories.Count(d => d == boundary.Replace('/', '\\'))
+                : accepted.Entries.Count
+        );
         Assert.Throws<InvalidDataException>(() =>
             new ContainerCatalog([new ContainerEntry(rejected, 0, version, directory)], "1234abcd")
         );
@@ -139,10 +144,12 @@ public sealed class ContainerCatalogTests
     [Fact]
     public void SharedParentAcrossCaseVariants_IsNotExpandedAgain()
     {
-        var catalog = new ContainerCatalog([
-            new ContainerEntry("Dir/Sub/one.txt", 1, "v1"),
-            new ContainerEntry("DIR/SUB/two.txt", 2, "v2"),
-        ], "1234abcd");
+        ContainerEntry[] entries =
+        [
+            new("Dir/Sub/one.txt", 1, "v1"),
+            new("DIR/SUB/two.txt", 2, "v2"),
+        ];
+        var catalog = new ContainerCatalog(entries, "1234abcd");
 
         Assert.Equal(2, catalog.Directories.Count);
         Assert.Contains(@"Dir\Sub", catalog.Directories);
