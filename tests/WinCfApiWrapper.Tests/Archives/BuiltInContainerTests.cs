@@ -105,6 +105,24 @@ public sealed class BuiltInContainerTests
         Assert.Equal("payload", await reader.ReadToEndAsync(testCancellationToken));
     }
 
+    [Fact]
+    public void TarContainer_NullArchiveFactory_IsRejected()
+    {
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
+            () => new TarContainer(null!)
+        );
+        Assert.Equal("openArchive", exception.ParamName);
+    }
+
+    [Fact]
+    public void TarGZipContainer_NullArchiveFactory_IsRejected()
+    {
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
+            () => new TarGZipContainer(null!)
+        );
+        Assert.Equal("openArchive", exception.ParamName);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
