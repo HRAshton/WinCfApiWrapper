@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text;
 using WinCfApiWrapper.Archives;
+using WinCfApiWrapper.Public.Containers;
 using Xunit;
 
 namespace WinCfApiWrapper.Tests.Archives;
