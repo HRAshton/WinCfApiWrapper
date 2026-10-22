@@ -50,10 +50,12 @@ internal static class Program
         var counts = new Counters();
         using var client = options.HttpUrl is null
             ? null
-            : new HttpClient(new RangeCounterHandler(new HttpClientHandler
-            {
-                AutomaticDecompression = DecompressionMethods.None,
-            }, counts));
+            : new HttpClient(
+                new RangeCounterHandler(
+                    new HttpClientHandler { AutomaticDecompression = DecompressionMethods.None },
+                    counts
+                )
+            );
         using var services = new ServiceCollection().AddWinCfApiWrapper().BuildServiceProvider();
         ICloudMountFactory factory = services.GetRequiredService<ICloudMountFactory>();
         ISyncRootManager manager = services.GetRequiredService<ISyncRootManager>();
@@ -70,7 +72,12 @@ internal static class Program
 
             // Separate indexing measurement does not prime the cold mount's cache.
             ZipContainer indexOnly = Container(archivePath, options, client, counts);
-            await Measure("zip-index-only", async () => { _ = await indexOnly.GetEntriesAsync(); }, counts, phases);
+            await Measure(
+                "zip-index-only",
+                async () => { _ = await indexOnly.GetEntriesAsync(); },
+                counts,
+                phases
+            );
 
             ZipContainer original = Container(archivePath, options, client, counts);
             active = factory.Open(MountOptions(original, mountBase));
@@ -100,8 +107,9 @@ internal static class Program
             await Measure("dispose-new-container", async () => await changed.DisposeAsync(), counts, phases);
             active = null;
 
-            string json = JsonSerializer.Serialize(new
-            {
+            string json = JsonSerializer.Serialize(
+                new
+                {
                 SchemaVersion = 1,
                 TimestampUtc = DateTimeOffset.UtcNow,
                 Runtime = RuntimeInformation.FrameworkDescription,
@@ -114,8 +122,10 @@ internal static class Program
                 options.RandomReads,
                 TrustedResume = true,
                 ValidateEntryMetadata = false,
-                Phases = phases,
-            }, new JsonSerializerOptions { WriteIndented = true });
+                    Phases = phases,
+                },
+                new JsonSerializerOptions { WriteIndented = true }
+            );
 
             Console.WriteLine(json);
             if (options.Output is not null)
@@ -127,13 +137,54 @@ internal static class Program
         }
         finally
         {
-            // Do not un-register an active connection if its native disconnect failed.
-            if (active is not null)
+            await CleanupBenchmarkAsync(active, mountRoot, scratch, manager);
+        }
+    }
+
+    private static async Task CleanupBenchmarkAsync(
+        ICloudMount? active,
+        string? mountRoot,
+        string scratch,
+        ISyncRootManager manager
+    )
+    {
+        // Never let cleanup mask the benchmark's original exception. In particular,
+        // do not delete a folder if a live CFAPI connection failed to disconnect.
+        if (active is not null)
+        {
+            try
+            {
                 await active.DisposeAsync();
+            }
+            catch (Exception error)
+            {
+                Console.Error.WriteLine($"Benchmark cleanup: disconnect failed; leaving {scratch}: {error}");
+                return;
+            }
+        }
+
+        try
+        {
             if (mountRoot is not null && Directory.Exists(mountRoot))
                 manager.Unregister(mountRoot);
-            manager.CleanupMounts(scratch); // Covers a failed partial mount.
-            Directory.Delete(scratch, recursive: true); // Scratch is always a generated GUID child.
+
+            // Covers a partial initial mount which created a root before throwing.
+            manager.CleanupMounts(scratch);
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine($"Benchmark cleanup: unregister failed; leaving {scratch}: {error}");
+            return;
+        }
+
+        try
+        {
+            // Scratch is always a newly generated GUID child, never a caller-owned directory.
+            Directory.Delete(scratch, recursive: true);
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine($"Benchmark cleanup: unable to remove {scratch}: {error}");
         }
     }
 
@@ -145,16 +196,25 @@ internal static class Program
         SkipResumeValidation = true,
     };
 
-    private static ZipContainer Container(string path, Options options, HttpClient? client, Counters counts)
+    private static ZipContainer Container(
+        string path,
+        Options options,
+        HttpClient? client,
+        Counters counts
+    )
     {
         if (client is not null)
             return ZipContainer.FromHttp(client, new Uri(options.HttpUrl!, UriKind.Absolute), validateEntryMetadata: false);
 
-        return new ZipContainer(_ =>
-        {
-            Interlocked.Increment(ref counts.FileOpens);
-            return new ReadCounterStream(File.OpenRead(path), counts);
-        }, validateEntryMetadata: false);
+        return new ZipContainer(
+            _ =>
+            {
+                FileStream stream = File.OpenRead(path);
+                counts.CountFileOpen();
+                return new ReadCounterStream(stream, counts);
+            },
+            validateEntryMetadata: false
+        );
     }
 
     private static async Task RandomReads(ICloudMount mount, string[] files, int count)
@@ -165,13 +225,23 @@ internal static class Program
         {
             string path = mount.Resolve(files[random.Next(files.Length)]);
             await using var stream = new FileStream(
-                path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
-                4096, FileOptions.Asynchronous);
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                4096,
+                FileOptions.Asynchronous
+            );
             _ = await stream.ReadAsync(buffer);
         }
     }
 
-    private static async Task Measure(string name, Func<Task> action, Counters counts, List<PhaseResult> phases)
+    private static async Task Measure(
+        string name,
+        Func<Task> action,
+        Counters counts,
+        List<PhaseResult> phases
+    )
     {
         Snapshot before = counts.Capture();
         long allocations = GC.GetTotalAllocatedBytes(precise: true);
@@ -183,12 +253,19 @@ internal static class Program
         timer.Stop();
         process.Refresh();
         Snapshot after = counts.Capture();
-        phases.Add(new PhaseResult(
-            name, timer.Elapsed.TotalMilliseconds,
-            GC.GetTotalAllocatedBytes(precise: true) - allocations,
-            process.WorkingSet64 - workingSet, process.PeakWorkingSet64,
-            after.FileOpens - before.FileOpens, after.FileBytes - before.FileBytes,
-            after.RangeRequests - before.RangeRequests, after.RangeBytes - before.RangeBytes));
+        phases.Add(
+            new PhaseResult(
+                name,
+                timer.Elapsed.TotalMilliseconds,
+                GC.GetTotalAllocatedBytes(precise: true) - allocations,
+                process.WorkingSet64 - workingSet,
+                process.PeakWorkingSet64,
+                after.FileOpens - before.FileOpens,
+                after.FileBytes - before.FileBytes,
+                after.RangeRequests - before.RangeRequests,
+                after.RangeBytes - before.RangeBytes
+            )
+        );
     }
 
     private static void GenerateArchive(string path, int entries, int bytesPerFile)
@@ -200,47 +277,72 @@ internal static class Program
         for (int i = 0; i < entries; i++)
         {
             ZipArchiveEntry entry = zip.CreateEntry(
-                $"build/{i / 100:D5}/file-{i:D7}.bin", CompressionLevel.NoCompression);
+                $"build/{i / 100:D5}/file-{i:D7}.bin",
+                CompressionLevel.NoCompression
+            );
             using Stream writer = entry.Open();
             writer.Write(content);
         }
     }
 
-    private sealed record PhaseResult(
-        string Phase, double Milliseconds, long AllocatedBytesProcessWide,
-        long WorkingSetDeltaBytes, long PeakWorkingSetBytesProcessLifetime,
-        long LocalArchiveOpens, long LocalArchiveReadBytes,
-        long HttpRangeRequests, long HttpRequestedRangeBytes);
-
     private readonly record struct Snapshot(
-        long FileOpens, long FileBytes, long RangeRequests, long RangeBytes);
+        long FileOpens,
+        long FileBytes,
+        long RangeRequests,
+        long RangeBytes
+    );
+
+    private sealed record PhaseResult(
+        string Phase,
+        double Milliseconds,
+        long AllocatedBytesProcessWide,
+        long WorkingSetDeltaBytes,
+        long PeakWorkingSetBytesProcessLifetime,
+        long LocalArchiveOpens,
+        long LocalArchiveReadBytes,
+        long HttpRangeRequests,
+        long HttpRequestedRangeBytes
+    );
 
     private sealed class Counters
     {
-        public long FileOpens;
-        public long FileBytes;
-        public long RangeRequests;
-        public long RangeBytes;
+        private long _fileOpens;
+        private long _fileBytes;
+        private long _rangeRequests;
+        private long _rangeBytes;
+
+        public void CountFileOpen() => Interlocked.Increment(ref _fileOpens);
+
+        public void CountFileBytes(long size) => Interlocked.Add(ref _fileBytes, size);
+
+        public void CountRangeRequest() => Interlocked.Increment(ref _rangeRequests);
+
+        public void CountRangeBytes(long size) => Interlocked.Add(ref _rangeBytes, size);
 
         public Snapshot Capture() => new(
-            Interlocked.Read(ref FileOpens), Interlocked.Read(ref FileBytes),
-            Interlocked.Read(ref RangeRequests), Interlocked.Read(ref RangeBytes));
+            Interlocked.Read(ref _fileOpens),
+            Interlocked.Read(ref _fileBytes),
+            Interlocked.Read(ref _rangeRequests),
+            Interlocked.Read(ref _rangeBytes)
+        );
     }
 
     private sealed class RangeCounterHandler(HttpMessageHandler inner, Counters counters)
         : DelegatingHandler(inner)
     {
         protected override async Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request, CancellationToken cancellationToken)
+            HttpRequestMessage request,
+            CancellationToken cancellationToken
+        )
         {
             HttpResponseMessage response = await base.SendAsync(request, cancellationToken);
             if (request.Headers.Range is { } range)
             {
-                Interlocked.Increment(ref counters.RangeRequests);
+                counters.CountRangeRequest();
                 foreach (var item in range.Ranges)
                 {
                     if (item.From.HasValue && item.To.HasValue)
-                        Interlocked.Add(ref counters.RangeBytes, item.To.Value - item.From.Value + 1);
+                        counters.CountRangeBytes(item.To.Value - item.From.Value + 1);
                 }
             }
 
@@ -251,26 +353,39 @@ internal static class Program
     private sealed class ReadCounterStream(Stream inner, Counters counters) : Stream
     {
         public override bool CanRead => inner.CanRead;
+
         public override bool CanSeek => inner.CanSeek;
+
         public override bool CanWrite => false;
+
         public override long Length => inner.Length;
-        public override long Position { get => inner.Position; set => inner.Position = value; }
+
+        public override long Position
+        {
+            get => inner.Position;
+            set => inner.Position = value;
+        }
+
         public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+
         public override void Flush() => inner.Flush();
+
         public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
 
         public override int Read(byte[] buffer, int offset, int count)
         {
             int read = inner.Read(buffer, offset, count);
-            Interlocked.Add(ref counters.FileBytes, read);
+            counters.CountFileBytes(read);
             return read;
         }
 
         public override int Read(Span<byte> buffer)
         {
             int read = inner.Read(buffer);
-            Interlocked.Add(ref counters.FileBytes, read);
+            counters.CountFileBytes(read);
             return read;
         }
 
@@ -278,12 +393,16 @@ internal static class Program
             Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             int read = await inner.ReadAsync(buffer, cancellationToken);
-            Interlocked.Add(ref counters.FileBytes, read);
+            counters.CountFileBytes(read);
             return read;
         }
 
         public override Task<int> ReadAsync(
-            byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken
+        ) =>
             ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
         protected override void Dispose(bool disposing)
@@ -295,8 +414,14 @@ internal static class Program
     }
 
     private sealed record Options(
-        int Entries, int BytesPerFile, int RandomReads, string? Archive,
-        string? HttpUrl, string? WorkParent, string? Output)
+        int Entries,
+        int BytesPerFile,
+        int RandomReads,
+        string? Archive,
+        string? HttpUrl,
+        string? WorkParent,
+        string? Output
+    )
     {
         public static Options Parse(string[] args)
         {
@@ -323,9 +448,14 @@ internal static class Program
             if (entries < 1 || entries > 250000 || fileBytes < 1
                 || fileBytes > 1048576 || reads < 0)
                 throw new ArgumentOutOfRangeException(nameof(args), "Invalid benchmark size.");
-            if (url is not null &&
-                (archive is null || !Uri.TryCreate(url, UriKind.Absolute, out Uri? parsed)
-                    || parsed.Scheme is not ("http" or "https")))
+            if (
+                url is not null
+                && (
+                    archive is null
+                    || !Uri.TryCreate(url, UriKind.Absolute, out Uri? parsed)
+                    || parsed.Scheme is not ("http" or "https")
+                )
+            )
                 throw new ArgumentException("HTTP mode requires --archive and an HTTP(S) URL for the identical ZIP.");
             return new Options(entries, fileBytes, reads, archive, url, parent, output);
         }
