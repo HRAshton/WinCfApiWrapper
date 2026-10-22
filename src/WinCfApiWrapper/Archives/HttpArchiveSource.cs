@@ -5,10 +5,39 @@ namespace WinCfApiWrapper.Archives;
 
 // A container owns one remote snapshot. Streams share its validator and length,
 // so file opens cannot silently adopt a replacement archive or repeat the probe.
-internal sealed class HttpArchiveSource(HttpClient client, Uri uri)
+internal sealed class HttpArchiveSource(HttpClient client, Uri uri, TimeSpan? rangeReadTimeout = null)
 {
+    private readonly TimeSpan? _rangeReadTimeout = ValidateRangeReadTimeout(rangeReadTimeout);
+
     private object? _initializationLock;
     private Snapshot? _snapshot;
+
+    private static TimeSpan? ValidateRangeReadTimeout(TimeSpan? value)
+    {
+        if (value is { } duration &&
+            (duration <= TimeSpan.Zero ||
+             duration > TimeSpan.FromMilliseconds(uint.MaxValue - 1)))
+        {
+            throw new ArgumentOutOfRangeException(
+                "rangeReadTimeout",
+                value,
+                "Range-read timeout must be positive and supported, or null to use existing HttpClient and caller timeouts."
+            );
+        }
+
+        return value;
+    }
+
+    // Deadlines are strictly opt-in; default HTTP reads allocate no extra CTS.
+    internal CancellationTokenSource? CreateDeadline(CancellationToken token)
+    {
+        if (_rangeReadTimeout is not { } timeout)
+            return null;
+
+        CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(timeout);
+        return deadline;
+    }
 
     public Stream OpenRead(CancellationToken token)
     {
@@ -103,20 +132,33 @@ internal sealed class HttpArchiveSource(HttpClient client, Uri uri)
 
     private async Task<Snapshot> ProbeAsync(CancellationToken token)
     {
-        using HttpResponseMessage response = await SendAsync(0, 0, null, token)
-            .ConfigureAwait(false);
-        EntityTagHeaderValue? etag = response.Headers.ETag is { IsWeak: false } strong
-            ? strong
-            : null;
-        DateTimeOffset? modified = response.Content.Headers.LastModified;
-        if (etag is null && modified is null)
+        using CancellationTokenSource? deadline = CreateDeadline(token);
+        CancellationToken effectiveToken = deadline?.Token ?? token;
+        try
         {
-            throw new IOException(
-                "Remote archives require a strong ETag or Last-Modified validator."
-            );
-        }
+            using HttpResponseMessage response = await SendAsync(0, 0, null, effectiveToken)
+                .ConfigureAwait(false);
+            EntityTagHeaderValue? etag = response.Headers.ETag is { IsWeak: false } strong
+                ? strong
+                : null;
+            DateTimeOffset? modified = response.Content.Headers.LastModified;
+            if (etag is null && modified is null)
+            {
+                throw new IOException(
+                    "Remote archives require a strong ETag or Last-Modified validator."
+                );
+            }
 
-        return new Snapshot(response.Content.Headers.ContentRange!.Length!.Value, etag, modified);
+            return new Snapshot(response.Content.Headers.ContentRange!.Length!.Value, etag, modified);
+        }
+        catch (OperationCanceledException ex) when (
+            deadline is not null &&
+            deadline.IsCancellationRequested &&
+            !token.IsCancellationRequested
+        )
+        {
+            throw new TimeoutException("HTTP archive range probe exceeded its deadline.", ex);
+        }
     }
 
     public sealed record Snapshot(

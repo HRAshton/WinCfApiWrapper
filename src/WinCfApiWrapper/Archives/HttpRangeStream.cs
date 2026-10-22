@@ -85,15 +85,28 @@ internal sealed class HttpRangeStream(
         );
         if (size == 0)
             return 0;
-        using HttpResponseMessage response = await source
-            .SendAsync(Position, Position + size - 1, snapshot, readToken)
-            .ConfigureAwait(false);
-        await using Stream body = await response
-            .Content.ReadAsStreamAsync(readToken)
-            .ConfigureAwait(false);
-        await body.ReadExactlyAsync(buffer[..size], readToken).ConfigureAwait(false);
-        Position += size;
-        return size;
+        using CancellationTokenSource? deadline = source.CreateDeadline(readToken);
+        CancellationToken effectiveToken = deadline?.Token ?? readToken;
+        try
+        {
+            using HttpResponseMessage response = await source
+                .SendAsync(Position, Position + size - 1, snapshot, effectiveToken)
+                .ConfigureAwait(false);
+            await using Stream body = await response
+                .Content.ReadAsStreamAsync(effectiveToken)
+                .ConfigureAwait(false);
+            await body.ReadExactlyAsync(buffer[..size], effectiveToken).ConfigureAwait(false);
+            Position += size;
+            return size;
+        }
+        catch (OperationCanceledException ex) when (
+            deadline is not null &&
+            deadline.IsCancellationRequested &&
+            !readToken.IsCancellationRequested
+        )
+        {
+            throw new TimeoutException("HTTP archive range read exceeded its deadline.", ex);
+        }
     }
 
     public override Task<int> ReadAsync(
