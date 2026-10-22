@@ -12,6 +12,18 @@ namespace WinCfApiWrapper.Hydration;
 internal sealed class FetchCoordinator : IAsyncDisposable
 {
     private const int MaxIdentityBytes = 4096;
+
+    // Only the required fields are read. The FETCH_DATA union has gained
+    // optional trailing fields across Windows versions; older ParamSize
+    // values remain usable if the required range fields are present.
+    private static readonly uint MinimumFetchDataSize = (uint)(
+        sizeof(uint)
+        + Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+            nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength)
+        ).ToInt32()
+        + sizeof(long)
+    );
+
     private readonly ContainerCatalog _catalog;
     private readonly Channel<FetchRequest> _channel;
     private readonly IContentContainer _container;
@@ -85,12 +97,52 @@ internal sealed class FetchCoordinator : IAsyncDisposable
     {
         try
         {
+            Interlocked.Increment(ref _attempts);
+
             if (infoPointer == nint.Zero || parametersPointer == nint.Zero)
                 throw new InvalidDataException("FETCH_DATA callback pointers are null.");
 
             CF_CALLBACK_INFO info = *(CF_CALLBACK_INFO*)infoPointer;
             var parameters = (CF_CALLBACK_PARAMETERS*)parametersPointer;
-            Interlocked.Increment(ref _attempts);
+
+            // ParamSize excludes union padding; inspect only the fields it covers.
+            if (parameters->ParamSize < MinimumFetchDataSize)
+                throw new InvalidDataException("Malformed FETCH_DATA parameters.");
+
+            long requiredOffset = parameters->FetchData.RequiredFileOffset;
+            long requiredLength = parameters->FetchData.RequiredLength;
+
+            // A wholly invalid range has no safe native completion. An overlong
+            // request beginning inside the file can still fail its valid overlap.
+            if (
+                info.FileSize <= 0
+                || requiredOffset < 0
+                || requiredLength <= 0
+                || requiredOffset >= info.FileSize
+            )
+                throw new InvalidDataException("FETCH_DATA range is outside the logical file.");
+
+            if (requiredLength > info.FileSize - requiredOffset)
+            {
+                long alignedStart =
+                    requiredOffset / NativeTransfer.Alignment * NativeTransfer.Alignment;
+
+                // The final range ends exactly at EOF and is legal even when short.
+                using var overlapping = new FetchRequest(
+                    info,
+                    alignedStart,
+                    info.FileSize - alignedStart,
+                    string.Empty
+                );
+                Interlocked.Increment(ref _failures);
+                TryFail(
+                    overlapping,
+                    new InvalidDataException("FETCH_DATA required range exceeds logical EOF.")
+                );
+
+                return;
+            }
+
             string name;
             try
             {
@@ -103,8 +155,8 @@ internal sealed class FetchCoordinator : IAsyncDisposable
                 // FileSize comes from CFAPI and remains available when identity bytes are malformed.
                 using var invalid = new FetchRequest(
                     info,
-                    parameters->FetchData.RequiredFileOffset,
-                    parameters->FetchData.RequiredLength,
+                    requiredOffset,
+                    requiredLength,
                     string.Empty
                 );
                 TryFail(invalid, identityError);
@@ -114,8 +166,8 @@ internal sealed class FetchCoordinator : IAsyncDisposable
 
             var request = new FetchRequest(
                 info,
-                parameters->FetchData.RequiredFileOffset,
-                parameters->FetchData.RequiredLength,
+                requiredOffset,
+                requiredLength,
                 name
             );
             bool added = Volatile.Read(ref _stopping) == 0 && _requests.TryAdd(request, 0);
@@ -137,7 +189,9 @@ internal sealed class FetchCoordinator : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // No managed exception may unwind through a CFAPI callback. Do not retry a completion here.
+            // An invalid payload has no reliable completion range; log without
+            // touching the native transfer key or retrying CfExecute.
+            Interlocked.Increment(ref _failures);
             Report(null, ex);
         }
     }

@@ -9,7 +9,7 @@ using Xunit;
 
 namespace WinCfApiWrapper.Tests.Hydration;
 
-public sealed class FetchCoordinatorTests : IDisposable
+public sealed partial class FetchCoordinatorTests : IDisposable
 {
     private readonly string _directory = Path.Combine(
         Path.GetTempPath(),
@@ -204,6 +204,383 @@ public sealed class FetchCoordinatorTests : IDisposable
         Assert.Single(calls);
         Assert.Equal(8, calls[0].Length); // CFAPI FileSize is the fallback without a valid identity.
         Assert.Equal(1, errors);
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
+    [Theory]
+    [InlineData(0u)]
+    [InlineData(4u)]
+    public async Task OnFetch_ShortParameterPayload_IsReportedWithoutNativeCompletion(
+        uint parameterSize
+    )
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        var calls = new List<TransferCall>();
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer((_, call) => calls.Add(call))
+        );
+
+        Invoke(
+            coordinator,
+            Encoding.UTF8.GetBytes("file.txt"),
+            8,
+            parameterSize: parameterSize
+        );
+
+        Assert.Empty(calls);
+        Assert.IsType<InvalidDataException>(Assert.Single(errors));
+        Assert.Equal(1, coordinator.Statistics.FetchAttempts);
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
+    [Theory]
+    [InlineData(28u)] // Required range only (older/compact layout).
+    [InlineData(44u)] // Required and optional ranges.
+    [InlineData(60u)] // Extended payload including dehydration metadata.
+    public async Task OnFetch_CompatiblePayloadSizes_AcceptRequiredFields(uint paramSize)
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        var calls = new List<TransferCall>();
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer((_, call) => calls.Add(call))
+        );
+
+        Invoke(coordinator, [0xFF], 8, parameterSize: paramSize);
+
+        Assert.Equal(NativeTransfer.StatusCloudFileUnsuccessful, Assert.Single(calls).CompletionStatus);
+        Assert.IsType<DecoderFallbackException>(Assert.Single(errors));
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
+    [Fact]
+    public async Task OnFetch_ParameterSizeOneByteShort_IsRejected()
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        uint minimumSize = (uint)(
+            sizeof(uint)
+            + Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+                nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength)
+            ).ToInt32()
+            + sizeof(long)
+        );
+        int calls = 0;
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer((_, _) => calls++)
+        );
+
+        Invoke(
+            coordinator,
+            Encoding.UTF8.GetBytes("file.txt"),
+            8,
+            parameterSize: minimumSize - 1
+        );
+
+        Assert.Equal(0, calls);
+        Assert.IsType<InvalidDataException>(Assert.Single(errors));
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
+    [Fact]
+    public async Task OnFetch_MinimumRequiredFields_AreSufficientToFailBadIdentity()
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        uint minimumSize = (uint)(
+            sizeof(uint)
+            + Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+                nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength)
+            ).ToInt32()
+            + sizeof(long)
+        );
+        var calls = new List<TransferCall>();
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer((_, call) => calls.Add(call))
+        );
+
+        Invoke(coordinator, [0xFF], 8, parameterSize: minimumSize);
+
+        TransferCall failure = Assert.Single(calls);
+        Assert.Equal(NativeTransfer.StatusCloudFileUnsuccessful, failure.CompletionStatus);
+        Assert.Equal(0, failure.Offset);
+        Assert.Equal(8, failure.Length);
+        Assert.IsType<DecoderFallbackException>(Assert.Single(errors));
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
+    [Theory]
+    [InlineData(-1, 1, 8)]
+    [InlineData(0, 0, 8)]
+    [InlineData(8, 1, 8)]
+    [InlineData(0, 1, 0)]
+    [InlineData(-1, 10, 8)]
+    public async Task OnFetch_InvalidRequiredRange_NeverCallsNative(
+        long offset,
+        long length,
+        long fileLength
+    )
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        var calls = new List<TransferCall>();
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer((_, call) => calls.Add(call))
+        );
+
+        Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), fileLength, offset, length);
+
+        Assert.Empty(calls);
+        Assert.IsType<InvalidDataException>(Assert.Single(errors));
+        Assert.Equal(1, coordinator.Statistics.FetchAttempts);
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
+    [Theory]
+    [InlineData(0, 9, 8, 0, 8)]
+    [InlineData(4097, 1000, 5000, 4096, 904)]
+    [InlineData(long.MaxValue - 1, 10, long.MaxValue, long.MaxValue - 4095, 4095)]
+    public async Task OnFetch_OverlongRange_FailsValidAlignedOverlapOnce(
+        long offset,
+        long length,
+        long fileLength,
+        long expectedOffset,
+        long expectedLength
+    )
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        var calls = new List<TransferCall>();
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer((_, call) => calls.Add(call))
+        );
+
+        Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), fileLength, offset, length);
+
+        TransferCall failure = Assert.Single(calls);
+        Assert.Equal(expectedOffset, failure.Offset);
+        Assert.Equal(expectedLength, failure.Length);
+        Assert.Equal(nint.Zero, failure.Buffer);
+        Assert.Equal(NativeTransfer.StatusCloudFileUnsuccessful, failure.CompletionStatus);
+        Assert.IsType<InvalidDataException>(Assert.Single(errors));
+        Assert.Equal(1, coordinator.Statistics.FetchAttempts);
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
+    [Fact]
+    public async Task OnFetch_OverlongRange_NativeFailureIsNotRetried()
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        int nativeCalls = 0;
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer(
+                (_, _) =>
+                {
+                    nativeCalls++;
+                    throw new IOException("injected native failure");
+                }
+            )
+        );
+
+        Invoke(coordinator, Encoding.UTF8.GetBytes("file.txt"), 8, 0, 9);
+
+        Assert.Equal(1, nativeCalls);
+        Assert.Equal(2, errors.Count);
+        Assert.Contains(errors, error => error.Message.Contains("failure completion failed"));
+        Assert.Contains(errors, error => error.Message.Contains("exceeds logical EOF"));
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
+    [Fact]
+    public void OnFetch_RequiredFieldsAbi_ExcludesCallbackUnionPadding()
+    {
+        Assert.Equal(
+            8,
+            Marshal.OffsetOf<CF_CALLBACK_PARAMETERS>(nameof(CF_CALLBACK_PARAMETERS.Anonymous))
+                .ToInt32()
+        );
+        Assert.Equal(
+            8,
+            Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+                nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredFileOffset)
+            ).ToInt32()
+        );
+        Assert.Equal(
+            16,
+            Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+                nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength)
+            ).ToInt32()
+        );
+
+        // Documented ParamSize is four bytes plus the populated union arm,
+        // not the eight-byte-aligned native offset of the union field.
+        Assert.Equal(28u, (uint)(
+            sizeof(uint)
+            + Marshal.OffsetOf<CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct>(
+                nameof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct.RequiredLength)
+            ).ToInt32()
+            + sizeof(long)
+        ));
+    }
+
+    [Theory]
+    [InlineData(0u)]
+    [InlineData(4u)]
+    [InlineData(27u)]
+    public async Task OnFetch_ProtectedPageRejectsPhysicallyShortParameterBuffer(uint paramSize)
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        int nativeCalls = 0;
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer((_, _) => nativeCalls++)
+        );
+
+        int pageSize = Environment.SystemPageSize;
+        nint pages = VirtualAlloc(nint.Zero, (nuint)(2 * pageSize), 0x3000, 0x04);
+        Assert.NotEqual(nint.Zero, pages);
+        try
+        {
+            // Only the four-byte ParamSize header is readable. Any access to
+            // FetchData will cross into a PAGE_NOACCESS page and fault.
+            Assert.True(VirtualProtect(pages + pageSize, (nuint)pageSize, 0x01, out _));
+            nint header = pages + pageSize - sizeof(uint);
+            Marshal.WriteInt32(header, checked((int)paramSize));
+            nint info = Marshal.AllocHGlobal(Marshal.SizeOf<CF_CALLBACK_INFO>());
+            try
+            {
+                Marshal.StructureToPtr(new CF_CALLBACK_INFO { FileSize = 8 }, info, false);
+                coordinator.OnFetch(info, header);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(info);
+            }
+        }
+        finally
+        {
+            Assert.True(VirtualFree(pages, 0, 0x8000));
+        }
+
+        Assert.Equal(0, nativeCalls);
+        Assert.IsType<InvalidDataException>(Assert.Single(errors));
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
+    [Fact]
+    public async Task OnFetch_InvalidIdentityAndRange_NeverCallsNative()
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        int calls = 0;
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer((_, _) => calls++)
+        );
+
+        Invoke(coordinator, [0xFF], 8, 8, 1);
+
+        Assert.Equal(0, calls);
+        Assert.IsType<InvalidDataException>(Assert.Single(errors));
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
+    [Fact]
+    public async Task OnFetch_InvalidIdentity_FailedNativeCompletionIsNotRetried()
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        int calls = 0;
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer(
+                (_, _) =>
+                {
+                    calls++;
+                    throw new IOException("CfExecute failed");
+                }
+            )
+        );
+
+        Invoke(coordinator, [0xFF], 8);
+
+        Assert.Equal(1, calls);
+        Assert.Equal(2, errors.Count);
+        Assert.Contains(errors, error => error.Message.Contains("failure completion failed"));
+        Assert.Contains(errors, error => error is DecoderFallbackException);
+        Assert.Equal(1, coordinator.Statistics.FailedFetches);
+    }
+
+    [Fact]
+    public async Task OnFetch_NullPointers_AreReportedWithoutNativeCompletion()
+    {
+        (ContainerCatalog catalog, IContentContainer container) = TestZipContainer.Create(_source);
+        int calls = 0;
+        var errors = new List<Exception>();
+        await using var coordinator = new FetchCoordinator(
+            catalog,
+            container,
+            0,
+            1,
+            (_, error) => errors.Add(error),
+            new NativeTransfer((_, _) => calls++)
+        );
+
+        coordinator.OnFetch(nint.Zero, nint.Zero);
+
+        Assert.Equal(0, calls);
+        Assert.IsType<InvalidDataException>(Assert.Single(errors));
+        Assert.Equal(1, coordinator.Statistics.FetchAttempts);
         Assert.Equal(1, coordinator.Statistics.FailedFetches);
     }
 
@@ -444,6 +821,27 @@ public sealed class FetchCoordinatorTests : IDisposable
         }
     }
 
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial nint VirtualAlloc(
+        nint address,
+        nuint size,
+        uint allocationType,
+        uint protect
+    );
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool VirtualProtect(
+        nint address,
+        nuint size,
+        uint newProtect,
+        out uint oldProtect
+    );
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool VirtualFree(nint address, nuint size, uint freeType);
+
     private void WriteArchive(int length)
     {
         if (File.Exists(_source))
@@ -461,7 +859,8 @@ public sealed class FetchCoordinatorTests : IDisposable
         byte[]? identity,
         long fileLength,
         long requiredOffset = 0,
-        long? requiredLength = null
+        long? requiredLength = null,
+        uint? parameterSize = null
     )
     {
         nint identityPointer = identity is null ? nint.Zero : Marshal.AllocHGlobal(identity.Length);
@@ -484,7 +883,7 @@ public sealed class FetchCoordinatorTests : IDisposable
             };
             var parameters = new CF_CALLBACK_PARAMETERS
             {
-                ParamSize = (uint)(
+                ParamSize = parameterSize ?? (uint)(
                     sizeof(uint)
                     + sizeof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct)
                 ),
