@@ -97,6 +97,112 @@ public sealed class CloudMountTransactionTests : IDisposable
     }
 
     [Fact]
+    public async Task CallbackRoot_ExistsOnlyDuringAnActiveConnection()
+    {
+        var fake = new FakeMountOperations(retainCallbacks: false);
+        CloudMount mount = Open(fake);
+        Assert.False(mount.CallbacksRooted);
+        try
+        {
+            await mount.MountAsync(TestContext.Current.CancellationToken);
+            Assert.True(mount.CallbacksRooted);
+        }
+        finally
+        {
+            await mount.DisposeAsync();
+        }
+
+        Assert.False(mount.CallbacksRooted);
+        Assert.Equal(1, fake.Calls.Count(call => call == "disconnect"));
+    }
+
+    [Fact]
+    public async Task CallbackRoot_IsReleasedWhenConnectFails()
+    {
+        var fake = new FakeMountOperations(name =>
+        {
+            if (name == "connect")
+                throw new IOException("Injected connection failure.");
+        }, retainCallbacks: false);
+        await using CloudMount mount = Open(fake);
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            mount.MountAsync(TestContext.Current.CancellationToken)
+        );
+        Assert.False(mount.CallbacksRooted);
+        Assert.DoesNotContain("disconnect", fake.Calls);
+    }
+
+    [Fact]
+    public async Task CallbackRoot_SurvivesDisconnectFailureUntilSuccessfulRetry()
+    {
+        bool rejectDisconnect = true;
+        var fake = new FakeMountOperations(name =>
+        {
+            if (name == "disconnect" && rejectDisconnect)
+                throw new IOException("Injected disconnect failure.");
+        }, retainCallbacks: false);
+        CloudMount mount = Open(fake);
+        try
+        {
+            await mount.MountAsync(TestContext.Current.CancellationToken);
+            Assert.True(mount.CallbacksRooted);
+
+            await Assert.ThrowsAsync<IOException>(() => mount.DisposeAsync().AsTask());
+            Assert.Equal(MountState.Faulted, mount.State);
+            Assert.True(mount.CallbacksRooted);
+
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
+            GC.WaitForPendingFinalizers();
+            Assert.True(mount.CallbacksRooted);
+        }
+        finally
+        {
+            rejectDisconnect = false;
+            await mount.DisposeAsync();
+        }
+
+        Assert.False(mount.CallbacksRooted);
+        Assert.Equal(2, fake.Calls.Count(call => call == "disconnect"));
+    }
+
+    [Fact]
+    public async Task OrphanedMount_RemainsRootedUntilExplicitDisconnection()
+    {
+        var fake = new FakeMountOperations(retainCallbacks: false);
+        WeakReference<CloudMount> weakMount = await OpenWithoutRetainingMountAsync(fake);
+
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
+        GC.WaitForPendingFinalizers();
+
+        CloudMount recovered = Assert.IsType<CloudMount>(
+            weakMount.TryGetTarget(out CloudMount? target) ? target : null
+        );
+        try
+        {
+            Assert.True(recovered.CallbacksRooted);
+        }
+        finally
+        {
+            await recovered.DisposeAsync();
+        }
+
+        Assert.False(recovered.CallbacksRooted);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(
+        System.Runtime.CompilerServices.MethodImplOptions.NoInlining
+    )]
+    private async Task<WeakReference<CloudMount>> OpenWithoutRetainingMountAsync(
+        FakeMountOperations fake
+    )
+    {
+        CloudMount mount = Open(fake);
+        await mount.MountAsync(TestContext.Current.CancellationToken);
+        return new WeakReference<CloudMount>(mount);
+    }
+
+    [Fact]
     public void SkipResumeValidation_RequiresExplicitTrustedIdentity()
     {
         var options = new CloudMountOptions

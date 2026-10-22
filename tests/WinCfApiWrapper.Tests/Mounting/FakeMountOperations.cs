@@ -11,7 +11,8 @@ internal sealed class FakeMountOperations(
     TaskCompletionSource? hydrateStarted = null,
     TaskCompletionSource? releaseHydrate = null,
     bool honorHydrationCancellation = false,
-    bool registered = false
+    bool registered = false,
+    bool retainCallbacks = true
 ) : IMountOperations
 {
     private readonly List<string> _calls = [];
@@ -60,7 +61,8 @@ internal sealed class FakeMountOperations(
             throw new IOException("Not registered");
 
         CallbackTypes = callbacks.Select(callback => unchecked((uint)callback.Type)).ToArray();
-        Callbacks = callbacks;
+        if (retainCallbacks)
+            Callbacks = callbacks;
 
         return 1;
     }
