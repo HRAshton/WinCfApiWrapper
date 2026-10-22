@@ -106,7 +106,8 @@ internal sealed class CloudMount : ICloudMount
         )
         {
             throw new ArgumentOutOfRangeException(
-                nameof(options),
+                nameof(options.ShutdownTimeout),
+                shutdownTimeout,
                 "ShutdownTimeout must be a positive finite wait or null for unlimited."
             );
         }

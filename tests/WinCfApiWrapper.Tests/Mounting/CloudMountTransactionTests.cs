@@ -454,7 +454,7 @@ public sealed class CloudMountTransactionTests : IDisposable
             TimeSpan.FromDays(60),
         })
         {
-            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            ArgumentOutOfRangeException error = Assert.Throws<ArgumentOutOfRangeException>(() =>
                 new CloudMount(
                     new CloudMountOptions
                     {
@@ -465,6 +465,8 @@ public sealed class CloudMountTransactionTests : IDisposable
                     new FakeMountOperations()
                 )
             );
+            Assert.Equal(nameof(CloudMountOptions.ShutdownTimeout), error.ParamName);
+            Assert.Equal(timeout, error.ActualValue);
         }
     }
 
