@@ -472,6 +472,7 @@ public sealed class CloudMountTransactionTests : IDisposable
     public async Task Dispose_StalledFetch_RetainsNativeCallbacksUntilWorkerDrains()
     {
         CancellationToken token = TestContext.Current.CancellationToken;
+
         // This test invokes the registered callback through the fake adapter.
         var fake = new FakeMountOperations(retainCallbacks: true);
         var logger = new RecordingLogger();
@@ -580,34 +581,6 @@ public sealed class CloudMountTransactionTests : IDisposable
         Assert.Equal(MountState.Stopped, mount.State);
         Assert.False(mount.CallbacksRooted);
         Assert.Equal(1, fake.Calls.Count(call => call == "disconnect"));
-    }
-
-    private static unsafe void SimulateFetch(FakeMountOperations fake)
-    {
-        byte[] identity = Encoding.UTF8.GetBytes("docs/one.txt");
-        fixed (byte* identityPointer = identity)
-        {
-            var info = new CF_CALLBACK_INFO
-            {
-                StructSize = (uint)Marshal.SizeOf<CF_CALLBACK_INFO>(),
-                FileIdentity = identityPointer,
-                FileIdentityLength = (uint)identity.Length,
-                FileSize = 7,
-                ConnectionKey = (CF_CONNECTION_KEY)1,
-                TransferKey = 2,
-                RequestKey = 3,
-            };
-            var parameters = new CF_CALLBACK_PARAMETERS
-            {
-                ParamSize = (uint)(
-                    sizeof(uint)
-                    + sizeof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct)
-                ),
-            };
-            parameters.FetchData.RequiredFileOffset = 0;
-            parameters.FetchData.RequiredLength = 7;
-            fake.Callbacks![0].Callback(&info, &parameters);
-        }
     }
 
     [Fact]
@@ -994,6 +967,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         await Assert.ThrowsAsync<InvalidDataException>(() =>
             mount.MountAsync(TestContext.Current.CancellationToken)
         );
+
         // The catalog now rejects the identity before a fingerprinted mount path
         // exists, so Root is intentionally unavailable.
         Assert.Throws<InvalidOperationException>(() => mount.Root);
@@ -1303,6 +1277,34 @@ public sealed class CloudMountTransactionTests : IDisposable
         Assert.False(Directory.Exists(Root));
     }
 
+    private static unsafe void SimulateFetch(FakeMountOperations fake)
+    {
+        byte[] identity = Encoding.UTF8.GetBytes(@"docs\one.txt");
+        fixed (byte* identityPointer = identity)
+        {
+            var info = new CF_CALLBACK_INFO
+            {
+                StructSize = (uint)Marshal.SizeOf<CF_CALLBACK_INFO>(),
+                FileIdentity = identityPointer,
+                FileIdentityLength = (uint)identity.Length,
+                FileSize = 7,
+                ConnectionKey = (CF_CONNECTION_KEY)1,
+                TransferKey = 2,
+                RequestKey = 3,
+            };
+            var parameters = new CF_CALLBACK_PARAMETERS
+            {
+                ParamSize = (uint)(
+                    sizeof(uint)
+                    + sizeof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct)
+                ),
+            };
+            parameters.FetchData.RequiredFileOffset = 0;
+            parameters.FetchData.RequiredLength = 7;
+            fake.Callbacks![0].Callback(&info, &parameters);
+        }
+    }
+
     private CloudMount Open(FakeMountOperations fake)
     {
         return new CloudMount(
@@ -1363,6 +1365,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         private readonly TaskCompletionSource _entered = new(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
+
         private readonly TaskCompletionSource _released = new(
             TaskCreationOptions.RunContinuationsAsynchronously
         );
@@ -1380,6 +1383,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         )
         {
             _entered.TrySetResult();
+
             // Deliberately ignore the canceled transport token to exercise
             // the provider-stall shutdown behavior without native CFAPI I/O.
             await _released.Task.ConfigureAwait(false);
