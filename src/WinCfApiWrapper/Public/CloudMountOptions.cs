@@ -51,7 +51,11 @@ public sealed record CloudMountOptions
     public IProgress<OperationProgress>? Progress { get; init; }
 
     /// <summary>Gets or initializes a caller-supplied eight-digit hexadecimal snapshot identity instead of hashing the listing.</summary>
-    /// <remarks>For controlled immutable sources only. Change this ID whenever any content or listing changes.</remarks>
+    /// <remarks>
+    /// For controlled immutable sources only. Change this ID whenever any content or listing changes.
+    /// Eight-character trusted IDs keep their existing .rzm-xxxxxxxx mount name;
+    /// only automatic listing fingerprints use the versioned .rzm-v2- name.
+    /// </remarks>
     public string? TrustedContentId { get; init; }
 
     /// <summary>Gets or initializes a value indicating whether to skip per-placeholder validation when resuming a trusted mount.</summary>

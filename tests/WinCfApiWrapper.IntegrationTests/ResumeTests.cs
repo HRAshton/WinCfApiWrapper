@@ -13,6 +13,86 @@ namespace WinCfApiWrapper.IntegrationTests;
 public sealed class ResumeTests
 {
     [Fact]
+    public async Task CollidingLegacyAutomaticZipPrefixes_NeverReuseHydratedFiles()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        string baseRoot = FixtureArchive.Root();
+        string archiveA = baseRoot + "-collision-a.zip";
+        string archiveB = baseRoot + "-collision-b.zip";
+        string legacyRoot = baseRoot + ".rzm-01beb68d";
+        string? firstRoot = null;
+        string? secondRoot = null;
+        var manager = new SyncRootManager(NullLogger<SyncRootManager>.Instance);
+
+        static void WriteArchive(string path, ulong value)
+        {
+            using ZipArchive archive = ZipFile.Open(path, ZipArchiveMode.Create);
+            using Stream entry = archive
+                .CreateEntry("file.txt", CompressionLevel.NoCompression)
+                .Open();
+            entry.Write(BitConverter.GetBytes(value));
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(baseRoot)!);
+        WriteArchive(archiveA, 37806);
+        WriteArchive(archiveB, 58888);
+        try
+        {
+            Directory.CreateDirectory(legacyRoot);
+            File.WriteAllText(Path.Combine(legacyRoot, "keep.txt"), "legacy");
+
+            await using (var first = new CloudMount(new CloudMountOptions
+            {
+                Root = baseRoot,
+                Container = new ZipContainer(_ => File.OpenRead(archiveA)),
+            }))
+            {
+                await first.MountAsync(token);
+                firstRoot = first.Root;
+                Assert.Equal(
+                    BitConverter.GetBytes((ulong)37806),
+                    await File.ReadAllBytesAsync(first.Resolve("file.txt"), token)
+                );
+            }
+
+            await using (var second = new CloudMount(new CloudMountOptions
+            {
+                Root = baseRoot,
+                Container = new ZipContainer(_ => File.OpenRead(archiveB)),
+            }))
+            {
+                await second.MountAsync(token);
+                secondRoot = second.Root;
+                Assert.NotEqual(firstRoot, secondRoot);
+                Assert.StartsWith(baseRoot + ".rzm-v2-", secondRoot);
+                Assert.Equal(
+                    BitConverter.GetBytes((ulong)58888),
+                    await File.ReadAllBytesAsync(second.Resolve("file.txt"), token)
+                );
+            }
+
+            // Archive A remains hydrated in its own directory. The legacy
+            // 32-bit path is neither resumed nor automatically deleted.
+            Assert.Equal(
+                BitConverter.GetBytes((ulong)37806),
+                await File.ReadAllBytesAsync(Path.Combine(firstRoot!, "file.txt"), token)
+            );
+            Assert.Equal("legacy", File.ReadAllText(Path.Combine(legacyRoot, "keep.txt")));
+        }
+        finally
+        {
+            if (firstRoot is not null && Directory.Exists(firstRoot))
+                manager.Unregister(firstRoot);
+            if (secondRoot is not null && Directory.Exists(secondRoot))
+                manager.Unregister(secondRoot);
+            if (Directory.Exists(legacyRoot))
+                Directory.Delete(legacyRoot, true);
+            File.Delete(archiveA);
+            File.Delete(archiveB);
+        }
+    }
+
+    [Fact]
     public async Task ChangedArchive_CreatesSeparateMount()
     {
         CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
