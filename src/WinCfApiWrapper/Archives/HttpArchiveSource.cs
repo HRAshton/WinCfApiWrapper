@@ -21,7 +21,7 @@ internal sealed class HttpArchiveSource(HttpClient client, Uri uri, TimeSpan? ra
             throw new ArgumentOutOfRangeException(
                 "rangeReadTimeout",
                 value,
-                "Range-read timeout must be a positive finite wait or null for unlimited."
+                "Range-read timeout must be positive and supported, or null to use existing HttpClient and caller timeouts."
             );
         }
 
