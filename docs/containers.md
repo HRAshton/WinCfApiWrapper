@@ -10,7 +10,15 @@ A container supplies a *stable read-only snapshot* of paths and file streams. Th
 
 TAR and single-file compressed formats decode and buffer content in memory while indexing. The built-in containers accept optional `ArchiveResourceLimits` (default: 250,000 archive entries and 256 MiB total buffered decoded file bytes). Exceeding either limit throws `InvalidDataException`; limits must be positive.
 
-For example, `new TarGZipContainer(openArchive, new ArchiveResourceLimits { MaxEntries = 500, MaxBufferedBytes = 32L * 1024 * 1024 })` reduces the budget. Single-file compressors accept `limits:` as their third constructor argument (after `entryName`). `ZipContainer` indexes archives of **200,000 files by default**, with headroom for explicit directory entries (250,000 entries total). It enforces the entry-count limit but **not** the buffered-byte limit, because ZIP files are streamed during hydration; large ZIP entries require separate upstream controls. The ZIP index and Windows placeholder creation still require memory and time proportional to the number of files. These budgets are not exact process memory/CPU limits. Prefer ZIP for large data or seekable range sources, and isolate hostile archives when appropriate. See [security-model.md](security-model.md).
+For example, `new TarGZipContainer(openArchive, new ArchiveResourceLimits { MaxEntries = 500, MaxBufferedBytes = 32L * 1024 * 1024 })` reduces the budget. Single-file compressors accept `limits:` as their third constructor argument (after `entryName`). `ZipContainer` indexes archives of **200,000 files by default**, with headroom for explicit directory entries (250,000 entries total). It enforces the entry-count limit but **not** the buffered-byte limit, because ZIP files are streamed during hydration; large ZIP entries require separate upstream controls. For untrusted ZIPs, set `ArchiveResourceLimits.MaxCentralDirectoryMetadataBytes` to a positive byte budget. This **opt-in** limit sums raw central records (46-byte header, filename, extra and comment), including directory entries, and rejects over-budget records **before their additional array is allocated**. `null` (the default, including `limits: null`) disables the budget for trusted ZIPs:
+```csharp
+var untrustedZip = new ZipContainer(openArchive, new ArchiveResourceLimits
+{
+    MaxEntries = 10_000,
+    MaxCentralDirectoryMetadataBytes = 8L * 1024 * 1024,
+});
+```
+This does not limit .NET `ZipArchive`'s own central-directory parsing or allocations, other catalog objects, or total process memory; isolate hostile archives when appropriate. The ZIP index and Windows placeholder creation still require memory and time proportional to the number of files. These budgets are not exact process memory/CPU limits. Prefer ZIP for large data or seekable range sources, and isolate hostile archives when appropriate. See [security-model.md](security-model.md).
 
 ## `IContentContainer` contract
 

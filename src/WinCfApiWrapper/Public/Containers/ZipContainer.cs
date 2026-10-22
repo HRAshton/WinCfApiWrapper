@@ -11,7 +11,7 @@ namespace WinCfApiWrapper.Public.Containers;
 /// The factory may be called concurrently and must return a new stream on every call. For remote archives, it can
 /// return a seekable range stream.
 /// </remarks>
-/// <param name="limits">Optional archive entry limit; ZIP file contents remain streamed.</param>
+/// <param name="limits">Optional archive limits, including an opt-in ZIP central-directory metadata-byte budget; ZIP file contents remain streamed.</param>
 /// <param name="validateEntryMetadata">Whether to reread the selected entry's metadata before opening it.</param>
 public sealed class ZipContainer(
     Func<CancellationToken, Stream> openArchive,
@@ -72,7 +72,11 @@ public sealed class ZipContainer(
         try
         {
             _catalog ??= await Task.Run(
-                    () => new ZipCatalog(_source.OpenRead(cancellationToken), _limits.MaxEntries),
+                    () => new ZipCatalog(
+                        _source.OpenRead(cancellationToken),
+                        _limits.MaxEntries,
+                        _limits.MaxCentralDirectoryMetadataBytes
+                    ),
                     cancellationToken
                 )
                 .ConfigureAwait(false);

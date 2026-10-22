@@ -2,9 +2,10 @@ namespace WinCfApiWrapper.Public.Containers;
 
 /// <summary>Bounds decoded data and archive entry counts for built-in containers.</summary>
 /// <remarks>
-/// Buffered formats enforce both limits while decoding. ZIP enforces only <see cref="MaxEntries" /> because
-/// ZIP entry data is streamed during hydration. The buffered byte limit is not an exact cap on process
-/// memory; streams, buffers, metadata, and allocations may use additional memory.
+/// Buffered formats enforce the entry and buffered-byte limits while decoding.
+/// ZIP enforces the entry count and optionally the cumulative central-directory
+/// metadata-byte limit; ZIP file data is streamed during hydration. These are not
+/// exact process-memory budgets; other allocations may use additional memory.
 /// </remarks>
 public sealed record ArchiveResourceLimits
 {
@@ -14,6 +15,16 @@ public sealed record ArchiveResourceLimits
     /// <summary>Gets the maximum total decoded bytes held by buffered containers (default 256 MiB).</summary>
     public long MaxBufferedBytes { get; init; } = 256L * 1024 * 1024;
 
+    /// <summary>
+    /// Gets an optional cumulative ZIP central-directory metadata-byte budget.
+    /// Null (the default) disables this budget, including for trusted artifacts.
+    /// </summary>
+    /// <remarks>
+    /// Counts raw central records including directory entries. Does not bound
+    /// ZipArchive's own allocations or total process memory.
+    /// </remarks>
+    public long? MaxCentralDirectoryMetadataBytes { get; init; }
+
     internal static ArchiveResourceLimits Resolve(ArchiveResourceLimits? limits)
     {
         ArchiveResourceLimits effective = limits ?? new ArchiveResourceLimits();
@@ -21,6 +32,13 @@ public sealed record ArchiveResourceLimits
             throw new ArgumentOutOfRangeException(nameof(limits), "MaxEntries must be positive.");
         if (effective.MaxBufferedBytes <= 0)
             throw new ArgumentOutOfRangeException(nameof(limits), "MaxBufferedBytes must be positive.");
+        if (effective.MaxCentralDirectoryMetadataBytes is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(limits),
+                "MaxCentralDirectoryMetadataBytes must be positive when provided."
+            );
+        }
         return effective;
     }
 }
