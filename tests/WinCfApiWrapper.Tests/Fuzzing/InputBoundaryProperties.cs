@@ -25,15 +25,20 @@ public sealed class InputBoundaryProperties
         Assert.Equal(normalized, ContainerPath.Normalize(normalized.Replace('\\', '/')));
         string root = Path.Combine(Path.GetTempPath(), "WinCfApiWrapper.FuzzRoot");
         string resolved = Path.GetFullPath(Path.Combine(root, normalized));
-        Assert.True(
-            normalized.Length == 0
-                ? string.Equals(root, resolved, StringComparison.OrdinalIgnoreCase)
-                : resolved.StartsWith(
-                    root + Path.DirectorySeparatorChar,
-                    StringComparison.OrdinalIgnoreCase
-                ),
-            $"Accepted path escaped its root: {input.Get}"
-        );
+        bool contained;
+        if (normalized.Length == 0)
+        {
+            contained = string.Equals(root, resolved, StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            contained = resolved.StartsWith(
+                root + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase
+            );
+        }
+
+        Assert.True(contained, $"Accepted path escaped its root: {input.Get}");
     }
 
     [Property(MaxTest = 1000)]
