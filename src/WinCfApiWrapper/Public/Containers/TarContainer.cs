@@ -11,13 +11,13 @@ public sealed class TarContainer(
     ArchiveResourceLimits? limits = null
 ) : BufferedContainer(limits)
 {
+    private readonly Func<CancellationToken, Stream> _openArchive =
+        openArchive ?? throw new ArgumentNullException(nameof(openArchive));
+
     /// <summary>Initializes a new instance of the <see cref="TarContainer" /> class.</summary>
     /// <param name="openArchive">A factory that returns a readable archive stream.</param>
     public TarContainer(Func<CancellationToken, Stream> openArchive)
         : this(openArchive, null) { }
-
-    private readonly Func<CancellationToken, Stream> _openArchive =
-        openArchive ?? throw new ArgumentNullException(nameof(openArchive));
 
     /// <inheritdoc />
     protected override IEnumerable<BufferedEntry> Decode(CancellationToken cancellationToken)

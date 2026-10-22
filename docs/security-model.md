@@ -28,6 +28,10 @@ A container fingerprint is a digest of the *declared listing and version metadat
 
 Trusted-source options deliberately relax consistency checks: `TrustedContentId` bypasses listing hashing, `SkipResumeValidation` skips placeholder metadata checks, and ZIP `validateEntryMetadata: false` skips rereading the selected central record. These options require an immutable source and an unchanged app-owned mount folder. Reusing a trusted ID for different content can expose stale hydrated files. Default settings retain consistency checks; safe-path and snapshot-membership validation remain enforced with trusted settings. The built-in HTTP ZIP source enforces exact ranges and remote version validators and rejects full-response fallbacks.
 
+### Trusted build-artifact performance contract
+
+For controlled, immutable production build artifacts, the host enables `TrustedContentId` and `SkipResumeValidation = true` and constructs ZIP containers with `validateEntryMetadata: false`. The host assumes responsibility for snapshot-ID uniqueness, remote byte immutability and exclusive ownership of the mount directory. This intentionally skips listing hashing, per-placeholder resume validation and selected ZIP record revalidation, but not initial indexing, path safety or CFAPI requirements. Do not silently add mandatory CRC/SHA, additional source I/O, per-placeholder checks or arbitrary untrusted-input caps to this trusted fast path. See [the Windows benchmark and no-regression contract](trusted-benchmark.md). These guarantees do **not** apply to arbitrary untrusted archives.
+
 ### Paths, permissions, and cleanup
 
 Use a dedicated, app-owned NTFS directory, not a volume root, shared folder, or user-data directory. `CleanupMounts(parentFolder)` and `Unregister(root)` deliberately delete recognized mount directories. Do not grant untrusted users write access to mount roots or a directory selected for cleanup. Application accounts need the Windows permissions required for Cloud Files sync-root registration.
