@@ -109,17 +109,35 @@ internal sealed class FetchCoordinator : IAsyncDisposable
 
             long requiredOffset = parameters->FetchData.RequiredFileOffset;
             long requiredLength = parameters->FetchData.RequiredLength;
-            // There is no legal CFAPI failure completion for an invalid range.
-            // Check before constructing a FetchRequest or reading the identity;
-            // this prevents accidentally submitting a malformed native transfer.
+            // A wholly invalid range has no safe native completion. An overlong
+            // request beginning inside the file can still fail its valid overlap.
             if (
                 info.FileSize <= 0
                 || requiredOffset < 0
                 || requiredLength <= 0
                 || requiredOffset >= info.FileSize
-                || requiredLength > info.FileSize - requiredOffset
             )
                 throw new InvalidDataException("FETCH_DATA range is outside the logical file.");
+
+            if (requiredLength > info.FileSize - requiredOffset)
+            {
+                long alignedStart =
+                    requiredOffset / NativeTransfer.Alignment * NativeTransfer.Alignment;
+                // The final range ends exactly at EOF and is legal even when short.
+                using var overlapping = new FetchRequest(
+                    info,
+                    alignedStart,
+                    info.FileSize - alignedStart,
+                    string.Empty
+                );
+                Interlocked.Increment(ref _failures);
+                TryFail(
+                    overlapping,
+                    new InvalidDataException("FETCH_DATA required range exceeds logical EOF.")
+                );
+
+                return;
+            }
 
             string name;
             try
