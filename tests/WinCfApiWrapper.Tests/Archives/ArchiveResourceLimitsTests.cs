@@ -152,8 +152,10 @@ public sealed class ArchiveResourceLimitsTests
         await Assert.ThrowsAsync<InvalidDataException>(async () =>
             await rejected.GetEntriesAsync(TestContext.Current.CancellationToken));
 
-        var accepted = new ZipContainer(_ => new MemoryStream(data),
-            limits with { MaxEntries = 2 });
+        var accepted = new ZipContainer(
+            _ => new MemoryStream(data),
+            limits with { MaxEntries = 2 }
+        );
         IReadOnlyCollection<ContainerEntry> entries =
             await accepted.GetEntriesAsync(TestContext.Current.CancellationToken);
         Assert.Equal(2, entries.Count);
@@ -217,11 +219,15 @@ public sealed class ArchiveResourceLimitsTests
     public void RejectsNonPositiveLimits()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new TarContainer(_ => new MemoryStream(),
-                new ArchiveResourceLimits { MaxEntries = 0 }));
+            new TarContainer(
+                _ => new MemoryStream(),
+                new ArchiveResourceLimits { MaxEntries = 0 }
+            ));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new GZipContainer(_ => new MemoryStream(),
-                limits: new ArchiveResourceLimits { MaxBufferedBytes = 0 }));
+            new GZipContainer(
+                _ => new MemoryStream(),
+                limits: new ArchiveResourceLimits { MaxBufferedBytes = 0 }
+            ));
     }
 
     [Fact]
