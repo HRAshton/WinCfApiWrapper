@@ -19,7 +19,9 @@ internal sealed class CloudMount : ICloudMount
     private readonly IContentContainer _container;
     private readonly CF_CALLBACK _fetchCallback;
 
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileHydrationSlots = new(
+    // Protected by _hydrationLock. A slot is kept only while at least one
+    // hydration owns or is waiting for it, preventing split-key semaphore races.
+    private readonly Dictionary<string, FileHydrationSlot> _fileHydrationSlots = new(
         StringComparer.OrdinalIgnoreCase
     );
 
@@ -146,8 +148,17 @@ internal sealed class CloudMount : ICloudMount
 
     public MountStatistics Statistics => _coordinator?.Statistics ?? default;
 
-    // Internal observation point for connection-lifetime regression tests.
+    // Internal observation points for lifetime/regression tests.
     internal bool CallbacksRooted => _callbackRoot.IsAllocated;
+
+    internal int ActiveFileHydrationSlotCount
+    {
+        get
+        {
+            lock (_hydrationLock)
+                return _fileHydrationSlots.Count;
+        }
+    }
 
     public async Task MountAsync(CancellationToken cancellationToken = default)
     {
@@ -632,16 +643,26 @@ internal sealed class CloudMount : ICloudMount
         }
     }
 
-    // Track placeholder reads so the sync root is not disconnected under an in-flight request.
+    // Track every holder and waiter before scheduling work. Keep the slot until
+    // the last operation completes, including cancellation while waiting.
     private Task HydrateFileAsync(string name, CancellationToken token)
     {
         Task operation;
+        FileHydrationSlot slot;
         lock (_hydrationLock)
         {
             if (_state != MountState.Mounted)
                 throw new InvalidOperationException("Mount is no longer active.");
 
-            operation = HydrateCoreAsync(name, token);
+            if (!_fileHydrationSlots.TryGetValue(name, out FileHydrationSlot? cached))
+            {
+                cached = new FileHydrationSlot();
+                _fileHydrationSlots.Add(name, cached);
+            }
+
+            slot = cached;
+            slot.Users++;
+            operation = HydrateCoreAsync(name, token, slot);
             _activeHydrations.Add(operation);
         }
 
@@ -659,36 +680,65 @@ internal sealed class CloudMount : ICloudMount
         return operation;
     }
 
-    private async Task HydrateCoreAsync(string name, CancellationToken token)
+    private sealed class FileHydrationSlot
     {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _shutdown.Token);
-        SemaphoreSlim fileSlot = _fileHydrationSlots.GetOrAdd(name, _ => new SemaphoreSlim(1));
-        await fileSlot.WaitAsync(linked.Token).ConfigureAwait(false);
+        public SemaphoreSlim Semaphore { get; } = new(1);
+
+        public int Users { get; set; }
+    }
+
+    private async Task HydrateCoreAsync(
+        string name,
+        CancellationToken token,
+        FileHydrationSlot slot
+    )
+    {
         try
         {
-            await _hydrationSlots.WaitAsync(linked.Token).ConfigureAwait(false);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+                token,
+                _shutdown.Token
+            );
+            await slot.Semaphore.WaitAsync(linked.Token).ConfigureAwait(false);
             try
             {
-                linked.Token.ThrowIfCancellationRequested();
-                ReportProgress(new OperationProgress("Hydrating", 0, 1, name));
-                using SafeFileHandle handle = File.OpenHandle(
-                    Resolve(name),
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.ReadWrite | FileShare.Delete,
-                    FileOptions.Asynchronous
-                );
-                await _operations.HydrateAsync(handle, linked.Token).ConfigureAwait(false);
-                ReportProgress(new OperationProgress("Hydrating", 1, 1, name));
+                await _hydrationSlots.WaitAsync(linked.Token).ConfigureAwait(false);
+                try
+                {
+                    linked.Token.ThrowIfCancellationRequested();
+                    ReportProgress(new OperationProgress("Hydrating", 0, 1, name));
+                    using SafeFileHandle handle = File.OpenHandle(
+                        Resolve(name),
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete,
+                        FileOptions.Asynchronous
+                    );
+                    await _operations.HydrateAsync(handle, linked.Token).ConfigureAwait(false);
+                    ReportProgress(new OperationProgress("Hydrating", 1, 1, name));
+                }
+                finally
+                {
+                    _hydrationSlots.Release();
+                }
             }
             finally
             {
-                _hydrationSlots.Release();
+                slot.Semaphore.Release();
             }
         }
         finally
         {
-            fileSlot.Release();
+            // Execute before completing the caller task: a canceled waiter
+            // cannot dispose a semaphore while another request still holds it.
+            lock (_hydrationLock)
+            {
+                if (--slot.Users == 0)
+                {
+                    _fileHydrationSlots.Remove(name);
+                    slot.Semaphore.Dispose();
+                }
+            }
         }
     }
 

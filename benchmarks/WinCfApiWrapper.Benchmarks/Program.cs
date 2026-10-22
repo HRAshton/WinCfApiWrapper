@@ -17,7 +17,7 @@ internal static class Program
     {
         if (args.Contains("--help"))
         {
-            Console.WriteLine("Options: --entries N --bytes-per-file N --random-reads N --files-per-directory N --resume-probe-passes N --archive ZIP --http-url URL --work-parent DIR --output JSON");
+            Console.WriteLine("Options: --entries N --bytes-per-file N --random-reads N --files-per-directory N --resume-probe-passes N --repeat-hydrations N --archive ZIP --http-url URL --work-parent DIR --output JSON");
             return 0;
         }
 
@@ -102,6 +102,16 @@ internal static class Program
 
             await Measure("random-file-reads", () => RandomReads(cold, files, options.RandomReads), counts, phases);
             await Measure("hydrate-all", () => cold.HydrateAllAsync(), counts, phases);
+            if (options.RepeatHydrations > 0)
+            {
+                await Measure(
+                    "rehydrate-existing-files",
+                    () => RepeatHydrations(cold, files, options.RepeatHydrations),
+                    counts,
+                    phases
+                );
+            }
+
             await Measure("dispose-cold", async () => await cold.DisposeAsync(), counts, phases);
             active = null;
 
@@ -132,6 +142,7 @@ internal static class Program
                     options.BytesPerFile,
                     options.RandomReads,
                     options.FilesPerDirectory,
+                    options.RepeatHydrations,
                     DirectoryProbes = directoryProbes,
                     TrustedResume = true,
                     ValidateEntryMetadata = false,
@@ -260,6 +271,12 @@ internal static class Program
             );
             _ = await stream.ReadAsync(buffer);
         }
+    }
+
+    private static async Task RepeatHydrations(ICloudMount mount, string[] files, int repetitions)
+    {
+        for (int i = 0; i < repetitions; i++)
+            await mount.HydrateAsync(files[i % files.Length]).ConfigureAwait(false);
     }
 
     private static async Task Measure(
@@ -498,6 +515,7 @@ internal static class Program
         int RandomReads,
         int FilesPerDirectory,
         int ResumeProbePasses,
+        int RepeatHydrations,
         string? Archive,
         string? HttpUrl,
         string? WorkParent,
@@ -507,7 +525,7 @@ internal static class Program
         public static Options Parse(string[] args)
         {
             int entries = 10000, fileBytes = 1024, reads = 128;
-            int filesPerDirectory = 100, probePasses = 0;
+            int filesPerDirectory = 100, probePasses = 0, repeatHydrations = 0;
             string? archive = null, url = null, parent = null, output = null;
             for (int i = 0; i < args.Length; i += 2)
             {
@@ -521,6 +539,7 @@ internal static class Program
                     case "--random-reads": reads = int.Parse(value); break;
                     case "--files-per-directory": filesPerDirectory = int.Parse(value); break;
                     case "--resume-probe-passes": probePasses = int.Parse(value); break;
+                    case "--repeat-hydrations": repeatHydrations = int.Parse(value); break;
                     case "--archive": archive = Path.GetFullPath(value); break;
                     case "--http-url": url = value; break;
                     case "--work-parent": parent = value; break;
@@ -531,7 +550,8 @@ internal static class Program
 
             if (entries < 1 || entries > 250000 || fileBytes < 1
                 || fileBytes > 1048576 || reads < 0
-                || filesPerDirectory < 1 || probePasses < 0 || probePasses > 50)
+                || filesPerDirectory < 1 || probePasses < 0 || probePasses > 50
+                || repeatHydrations < 0 || repeatHydrations > 1000000)
                 throw new ArgumentOutOfRangeException(nameof(args), "Invalid benchmark size.");
             if (
                 url is not null
@@ -543,7 +563,7 @@ internal static class Program
             )
                 throw new ArgumentException("HTTP mode requires --archive and an HTTP(S) URL for the identical ZIP.");
             return new Options(
-                entries, fileBytes, reads, filesPerDirectory, probePasses,
+                entries, fileBytes, reads, filesPerDirectory, probePasses, repeatHydrations,
                 archive, url, parent, output
             );
         }
