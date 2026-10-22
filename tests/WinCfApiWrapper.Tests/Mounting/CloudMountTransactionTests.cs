@@ -811,19 +811,24 @@ public sealed class CloudMountTransactionTests : IDisposable
         using (ZipArchive archive = ZipFile.Open(source, ZipArchiveMode.Create))
             archive.CreateEntry(longName);
 
+        var fake = new FakeMountOperations();
         await using var mount = new CloudMount(
             new CloudMountOptions
             {
                 Root = BaseRoot,
                 Container = new ZipContainer(_ => File.OpenRead(source)),
             },
-            new FakeMountOperations()
+            fake
         );
 
         await Assert.ThrowsAsync<InvalidDataException>(() =>
             mount.MountAsync(TestContext.Current.CancellationToken)
         );
-        Assert.False(Directory.Exists(mount.Root));
+        // The catalog now rejects the identity before a fingerprinted mount path
+        // exists, so Root is intentionally unavailable.
+        Assert.Throws<InvalidOperationException>(() => mount.Root);
+        Assert.Empty(fake.Calls);
+        Assert.Empty(Directory.EnumerateDirectories(_scratch, "*.rzm-*"));
     }
 
     [Fact]
