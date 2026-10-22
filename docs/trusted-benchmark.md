@@ -74,4 +74,4 @@ For each phase JSON contains elapsed milliseconds, **process-wide** managed allo
 
 The [manual workflow](../.github/workflows/trusted-benchmark.yml) performs Windows benchmarks on both supported runtimes and uploads the JSON artifacts. Standard CI **compiles only**; it does not automatically execute costly native benchmarks.
 
-The current PR adds instrumentation and documentation, **not a measured baseline**. Run the manual workflow on this PR's SHA and save its artifacts before merging further optimization PRs.
+The current PR adds instrumentation and documentation, **not a measured baseline**. Before merging this draft, run the commands above from a Windows checkout of the PR branch. GitHub Actions `workflow_dispatch` workflows generally must exist on the **default branch** before they can be launched through the Actions UI; after this PR is merged, use the manual workflow on `master` and save its raw artifacts **before the next performance-sensitive PR**.
