@@ -95,13 +95,15 @@ dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net10.0
 
 `DirectoryProbes` compares the former `exists-then-attributes` loop with
 `single-get-attributes` (wall time and process-wide managed allocations).
+The directory list comes from the mounted filesystem tree, including all
+implicit ZIP parent directories rather than only explicit directory entries.
 Sample order alternates to reduce filesystem cache bias. This A/B microprobe
 is **not** proof of an end-to-end warm-resume improvement; keep it outside
 regular timed phases. The `--resume-probe-passes` default is `0` so
 existing benchmark behavior is unchanged. `--files-per-directory` defaults
 to 100, matching prior synthetic layouts.
 
-**Do not merge this optimization solely on the microprobe.** Alternately
+**Do not merge this optimization solely on the microprobe.** Alternatively
 benchmark parent/PR commits on the same Windows host with identical ZIP
 artifacts (e.g. one-file-per-directory and 100-files-per-directory), five
 runs per commit, recording ZIP indexing, cold mount, warm resume, random fetch,

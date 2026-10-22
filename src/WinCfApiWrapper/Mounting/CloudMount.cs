@@ -532,6 +532,8 @@ internal sealed class CloudMount : ICloudMount
             ex is IOException
                 or UnauthorizedAccessException
                 or System.Security.SecurityException
+                or ArgumentException
+                or NotSupportedException
         )
         {
             return false;

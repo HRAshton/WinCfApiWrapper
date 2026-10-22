@@ -86,8 +86,17 @@ internal static class Program
             List<DirectoryProbeResult>? directoryProbes = null;
             if (options.ResumeProbePasses > 0)
             {
-                string[] directories = listing.Where(e => e.IsDirectory)
-                    .Select(e => Path.Combine(cold.Root, e.RelativePath)).ToArray();
+                // Synthetic ZIP entries contain only files; their parent directories
+                // are implicit. Enumerate the actual mounted tree so the probe
+                // covers every directory checked on resume, not just ZIP entries
+                // explicitly marked as directories.
+                string[] directories = Directory.GetDirectories(
+                    cold.Root,
+                    "*",
+                    SearchOption.AllDirectories
+                );
+                if (directories.Length == 0)
+                    throw new InvalidOperationException("No directories available for resume probe.");
                 directoryProbes = CompareDirectoryProbes(directories, options.ResumeProbePasses);
             }
 

@@ -439,6 +439,9 @@ public sealed class CloudMountTransactionTests : IDisposable
         Assert.True(CloudMount.IsValidResumeDirectory(folder));
         Assert.False(CloudMount.IsValidResumeDirectory(file));
         Assert.False(CloudMount.IsValidResumeDirectory(Path.Combine(_scratch, "missing")));
+        Assert.False(CloudMount.IsValidResumeDirectory(string.Empty));
+        Assert.False(CloudMount.IsValidResumeDirectory(" "));
+        Assert.False(CloudMount.IsValidResumeDirectory("invalid\0path"));
     }
 
     [Fact]
@@ -454,17 +457,20 @@ public sealed class CloudMountTransactionTests : IDisposable
             CreateNoWindow = true,
         };
         using System.Diagnostics.Process process = System.Diagnostics.Process.Start(start)!;
-        process.WaitForExit();
-        Assert.Equal(0, process.ExitCode);
         try
         {
+            Assert.True(process.WaitForExit(5000), "Junction creation timed out.");
+            Assert.Equal(0, process.ExitCode);
             Assert.True(Directory.Exists(link));
             Assert.True((File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0);
             Assert.False(CloudMount.IsValidResumeDirectory(link));
         }
         finally
         {
-            Directory.Delete(link);
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            if (Directory.Exists(link))
+                Directory.Delete(link);
         }
     }
 
