@@ -120,8 +120,49 @@ public sealed class HttpZipContainerTests
         Assert.Equal(1, responses.ProbeCount);
     }
 
-    [Fact]
-    public async Task RangeDeadline_CallerCancellationRemainsCancellationNotTimeout()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RangeDeadline_CanceledProbePreservesCancellationAndAllowsRetry(
+        bool withDeadline
+    )
+    {
+        CancellationToken testToken = TestContext.Current.CancellationToken;
+        using var responses = new RangeHandler(BuildArchive([1, 2, 3], 1));
+        using var handler = new OnceStalledRangeHandler(responses, stallProbe: true);
+        using var client = new HttpClient(handler);
+        var source = new HttpArchiveSource(
+            client,
+            new Uri("https://archive.test/files.zip"),
+            withDeadline ? TimeSpan.FromSeconds(10) : null
+        );
+        using var canceled = CancellationTokenSource.CreateLinkedTokenSource(testToken);
+
+        // OpenRead performs the initial probe synchronously. Use a dedicated
+        // worker so the test can cancel while SendAsync awaits response headers.
+        Task<Stream> opening = Task.Factory.StartNew(
+            () => source.OpenRead(canceled.Token),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
+        await handler.Stalled.Task.WaitAsync(TimeSpan.FromSeconds(5), testToken);
+        canceled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            using Stream ignored = await opening.WaitAsync(TimeSpan.FromSeconds(5), testToken);
+        });
+
+        // A canceled probe must not cache an incomplete snapshot.
+        using Stream retry = source.OpenRead(testToken);
+        Assert.Equal(responses.Archive.Length, retry.Length);
+        Assert.Equal(1, responses.ProbeCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RangeDeadline_CallerCancellationRemainsCancellationNotTimeout(bool withDeadline)
     {
         using var responses = new RangeHandler(BuildArchive([1, 2, 3], 1));
         using var handler = new OnceStalledRangeHandler(responses, stallRange: true);
@@ -129,7 +170,7 @@ public sealed class HttpZipContainerTests
         var source = new HttpArchiveSource(
             client,
             new Uri("https://archive.test/files.zip"),
-            TimeSpan.FromSeconds(10)
+            withDeadline ? TimeSpan.FromSeconds(10) : null
         );
         using Stream input = source.OpenRead(TestContext.Current.CancellationToken);
         using var cancel = CancellationTokenSource.CreateLinkedTokenSource(
