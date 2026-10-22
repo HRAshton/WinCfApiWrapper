@@ -36,7 +36,11 @@ For controlled, immutable production build artifacts, the host enables `TrustedC
 
 ### Paths, permissions, and cleanup
 
-Use a dedicated, app-owned NTFS directory, not a volume root, shared folder, or user-data directory. `CleanupMounts(parentFolder)` and `Unregister(root)` deliberately delete recognized mount directories. Do not grant untrusted users write access to mount roots or a directory selected for cleanup. Application accounts need the Windows permissions required for Cloud Files sync-root registration.
+Use a **dedicated application-owned NTFS parent**, not a volume root, shared folder, or user-data directory. Its ACL must prevent untrusted users/processes from creating, renaming, replacing, or reparenting any mount directory or child. The parent and all ancestor directories must be protected from attacker-controlled substitutions. Call cleanup only **after a successful native disconnect**: filename conventions alone do not convey ownership.
+
+During cleanup only, registered mount roots must match the WinCfApiWrapper Cloud Files provider name, and cleanup rejects root or nested **directory** reparse points (Cloud Files file placeholders are allowed). A previously unregistered folder is deleted only if an earlier cleanup/rollback attempt wrote the pending-cleanup marker; unrelated `.rzm-*` folders without that marker are refused. The marker is **not a cryptographic ownership proof**: a user able to write the app's private parent can forge it. Rollback and unregister write it as necessary so failed deletion can be retried. Both legacy and v2 recognized mount names retain this policy.
+
+**Residual limitation:** provider display names are not cryptographic identities, and checks made by pathname cannot close a concurrent rename/reparse path-swap race against an adversary with write permission. .NET recursive deletion does not intentionally traverse directory reparse points, but hostile write access can still invalidate pathname-based safety. Do not grant untrusted users access to the parent; strong handle-relative, file-ID-verified recursive deletion would be needed to remove this remaining race. Cleanup errors fail closed and may require manual inspection.
 
 ### Native integration and failure modes
 

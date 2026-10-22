@@ -29,6 +29,8 @@ internal sealed class FakeMountOperations(
 
     public bool Registered { get; private set; } = registered;
 
+    public bool OwnsRegistration { get; set; } = true;
+
     public CF_CALLBACK_REGISTRATION[]? Callbacks { get; private set; }
 
     public TaskCompletionSource? HydrateStarted => hydrateStarted;
@@ -89,6 +91,12 @@ internal sealed class FakeMountOperations(
     public bool IsRegistered(string root)
     {
         return Registered;
+    }
+
+    public bool IsOwnedSyncRoot(string root)
+    {
+        Step("check-owner");
+        return Registered && OwnsRegistration;
     }
 
     public async Task HydrateAsync(SafeFileHandle handle, CancellationToken cancellationToken)
