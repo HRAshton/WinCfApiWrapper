@@ -764,10 +764,12 @@ public sealed class CloudMountTransactionTests : IDisposable
         await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
         Task disposal = mount.DisposeAsync().AsTask();
         Assert.False(disposal.IsCompleted);
+        Assert.Equal(1, mount.ActiveFileHydrationSlotCount);
         Assert.DoesNotContain("disconnect", fake.Calls);
         fake.ReleaseHydrate!.SetResult();
         await hydration;
         await disposal;
+        Assert.Equal(0, mount.ActiveFileHydrationSlotCount);
         Assert.Contains("disconnect", fake.Calls);
     }
 
@@ -1238,6 +1240,90 @@ public sealed class CloudMountTransactionTests : IDisposable
     }
 
     [Fact]
+    public async Task HydrateAll_ThousandsOfDistinctPaths_DoNotRetainIdleFileLocks()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        const int fileCount = 2048;
+        string source = Path.Combine(_scratch, "many-entries.zip");
+        using (ZipArchive archive = ZipFile.Open(source, ZipArchiveMode.Create))
+        {
+            for (int i = 0; i < fileCount; i++)
+                archive.CreateEntry($"files/file-{i:D5}.txt");
+        }
+
+        var fake = new FakeMountOperations();
+        await using var mount = new CloudMount(
+            new CloudMountOptions
+            {
+                Root = Path.Combine(_scratch, "many-files"),
+                Container = new ZipContainer(_ => File.OpenRead(source)),
+                BulkHydrationConcurrency = 1,
+                TrustedContentId = "1234abcd",
+                SkipResumeValidation = true,
+            },
+            fake
+        );
+        await mount.MountAsync(token);
+        await mount.HydrateAllAsync(cancellationToken: token);
+        Assert.Equal(fileCount, fake.Calls.Count(call => call == "hydrate"));
+        Assert.Equal(0, mount.ActiveFileHydrationSlotCount);
+        await mount.HydrateAsync("files/file-00001.txt", token);
+        Assert.Equal(0, mount.ActiveFileHydrationSlotCount);
+    }
+
+    [Fact]
+    public async Task ConcurrentHydration_CanceledWaiter_DoesNotReleaseActiveFileLock()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        var fake = new FakeMountOperations(
+            hydrateStarted: new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            ),
+            releaseHydrate: new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            )
+        );
+        await using var mount = Open(fake);
+        await mount.MountAsync(token);
+
+        Task first = mount.HydrateAsync("docs/one.txt", token);
+        await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5), token);
+        using var canceledWaiter = new CancellationTokenSource();
+        Task second = mount.HydrateAsync("DOCS/ONE.TXT", canceledWaiter.Token);
+        Task third = mount.HydrateAsync("docs/one.txt", token);
+        try
+        {
+            Assert.Equal(1, mount.ActiveFileHydrationSlotCount);
+            canceledWaiter.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second);
+            Assert.Equal(1, mount.ActiveFileHydrationSlotCount);
+            Assert.Equal(1, fake.ActiveHydrates);
+        }
+        finally
+        {
+            fake.ReleaseHydrate!.TrySetResult();
+        }
+
+        await Task.WhenAll(first, third).WaitAsync(TimeSpan.FromSeconds(10), token);
+        Assert.Equal(1, fake.MaxActiveHydrates);
+        Assert.Equal(0, mount.ActiveFileHydrationSlotCount);
+    }
+
+    [Fact]
+    public async Task Hydrate_FailedNativeOperation_DoesNotRetainFileLock()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        var fake = new FakeMountOperations(
+            afterHydrate: () => throw new IOException("injected hydration failure")
+        );
+        await using var mount = Open(fake);
+        await mount.MountAsync(token);
+
+        await Assert.ThrowsAsync<IOException>(() => mount.HydrateAsync("docs/one.txt", token));
+        Assert.Equal(0, mount.ActiveFileHydrationSlotCount);
+    }
+
+    [Fact]
     public async Task ConcurrentExplicitHydration_64Requests_RespectsNativeConcurrencyLimit()
     {
         CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
@@ -1259,6 +1345,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellationToken);
         try
         {
+            Assert.Equal(1, mount.ActiveFileHydrationSlotCount);
             Assert.InRange(fake.ActiveHydrates, 1, 4);
         }
         finally
@@ -1269,6 +1356,7 @@ public sealed class CloudMountTransactionTests : IDisposable
         await Task.WhenAll(hydrations).WaitAsync(TimeSpan.FromSeconds(10), testCancellationToken);
         Assert.Equal(1, fake.MaxActiveHydrates);
         Assert.Equal(0, fake.ActiveHydrates);
+        Assert.Equal(0, mount.ActiveFileHydrationSlotCount);
     }
 
     [Fact]

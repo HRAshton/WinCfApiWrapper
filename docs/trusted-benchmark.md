@@ -112,3 +112,40 @@ separately times ZIP index and whole mount, but **does not yet separate**
 catalog construction from native connection; any remaining time attribution
 to those phases needs additional Windows instrumentation. Require a repeatable
 warm-resume win and no cold-mount or fetch regressions before merge.
+
+## PERF-01 — explicit hydration lock retention experiment
+
+Explicit hydration previously stored one `SemaphoreSlim` per unique relative
+path in a mount-lifetime `ConcurrentDictionary`; long-lived mounts performing
+many unique hydrations retained these semaphores after operations completed.
+The proposed reference-counted dictionary is protected by the existing
+hydration lifecycle lock: every caller (including semaphore waiters) increments
+the count **before** awaiting, and the last completed caller removes/disposes
+the semaphore. A later request then creates a new slot safely. Ordinary native
+`FETCH_DATA` callbacks do not use these locks and are unchanged.
+
+Measure **before vs after** with identical Windows hosts and immutable ZIP
+fixtures, five alternating runs per commit. Keep `--repeat-hydrations 0` for
+the original PERF-00-compatible phase set. Opt in to an extra measured phase
+for already-hydrated files:
+
+```powershell
+dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net8.0-windows -- --entries 10000 --bytes-per-file 1024 --random-reads 128 --repeat-hydrations 10000 --output perf01-net8.json
+dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net10.0-windows -- --entries 10000 --bytes-per-file 1024 --random-reads 128 --repeat-hydrations 10000 --output perf01-net10.json
+```
+
+`hydrate-all` exercises many distinct keys; `rehydrate-existing-files`
+exercises re-creation of locks after previous operations have finished,
+reporting wall-clock time and process-wide allocations. Repeat with a larger
+distinct-path workload when relevant. The optional phase occurs before cold
+disposal and does not access a ZIP entry again if its placeholder is already
+hydrated; compare source-open/read counts as a regression guard. Existing
+baseline numbers do **not** prove this change improves throughput or peak
+memory. Retained slot count after many distinct hydrations, and live slot count during
+contention/cancellation are asserted by the Windows unit suite.
+
+**Merge condition:** the after version must reduce retained keyed lock objects
+without material performance regression for hydrate-all, repeated hydrations,
+native fetches or shutdown; if the memory benefit is not worth added
+synchronization and per-operation allocation, retain the previous simpler
+implementation. No PR should claim a win without A/B Windows results.
