@@ -31,6 +31,16 @@ public sealed record CloudMountOptions
     /// </summary>
     public int BulkHydrationConcurrency { get; init; } = 4;
 
+    /// <summary>
+    /// Gets or initializes an optional total wait for fetch and explicit-hydration drains on shutdown.
+    /// Null (the default) waits indefinitely.
+    /// </summary>
+    /// <remarks>
+    /// This is a wait deadline, not a forced stop of uncooperative provider I/O. Expiry
+    /// throws TimeoutException and retains CFAPI callbacks/connection for a disposal retry.
+    /// </remarks>
+    public TimeSpan? ShutdownTimeout { get; init; }
+
     /// <summary>Gets or initializes progress for indexing, placeholders, fetches, hydration, and shutdown.</summary>
     /// <remarks>
     /// Reports can originate on concurrent workers. Intermediate placeholder creation and resume reports

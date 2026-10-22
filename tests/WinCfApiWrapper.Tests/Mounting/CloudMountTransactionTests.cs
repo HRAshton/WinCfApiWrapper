@@ -1,10 +1,14 @@
 using System.Collections.Concurrent;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Extensions.Logging;
 using WinCfApiWrapper.Archives;
+using WinCfApiWrapper.Hydration;
 using WinCfApiWrapper.Mounting;
 using WinCfApiWrapper.Public;
 using WinCfApiWrapper.Public.Containers;
+using Windows.Win32.Storage.CloudFilters;
 using Xunit;
 
 namespace WinCfApiWrapper.Tests.Mounting;
@@ -438,6 +442,171 @@ public sealed class CloudMountTransactionTests : IDisposable
         await resumed.MountAsync(testCancellationToken);
         Assert.Equal(MountState.Mounted, resumed.State);
         Assert.DoesNotContain("register", fake.Calls);
+    }
+
+    [Fact]
+    public void Open_InvalidShutdownWait_RejectsConfiguration()
+    {
+        foreach (TimeSpan timeout in new[]
+        {
+            TimeSpan.Zero,
+            TimeSpan.FromTicks(-1),
+            TimeSpan.FromDays(60),
+        })
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+                new CloudMount(
+                    new CloudMountOptions
+                    {
+                        Root = BaseRoot,
+                        Container = new ZipContainer(_ => File.OpenRead(Source)),
+                        ShutdownTimeout = timeout,
+                    },
+                    new FakeMountOperations()
+                )
+            );
+        }
+    }
+
+    [Fact]
+    public async Task Dispose_StalledFetch_RetainsNativeCallbacksUntilWorkerDrains()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        var fake = new FakeMountOperations(retainCallbacks: false);
+        var logger = new RecordingLogger();
+        var stalled = new StalledReadStream();
+        var mount = new CloudMount(
+            new CloudMountOptions
+            {
+                Root = BaseRoot,
+                Container = new ZipContainer(_ => File.OpenRead(Source)),
+                FetchWorkers = 1,
+                ShutdownTimeout = TimeSpan.FromMilliseconds(200),
+            },
+            fake,
+            logger,
+            new NativeTransfer((_, _) => { }),
+            _ => stalled
+        );
+
+        await mount.MountAsync(token);
+        try
+        {
+            SimulateFetch(fake);
+            await stalled.ReadEntered.WaitAsync(TimeSpan.FromSeconds(5), token);
+
+            TimeoutException error = await Assert.ThrowsAsync<TimeoutException>(() =>
+                mount.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), token)
+            );
+            Assert.Contains("fetch workers", error.Message);
+            Assert.Equal(MountState.Faulted, mount.State);
+            Assert.True(mount.CallbacksRooted);
+            Assert.Equal(1, mount.Statistics.ActiveFetches);
+            Assert.DoesNotContain("disconnect", fake.Calls);
+            Assert.Contains(
+                logger.Entries,
+                item => item.Level == LogLevel.Warning && item.Exception is TimeoutException
+            );
+        }
+        finally
+        {
+            stalled.Release();
+            await mount.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), token);
+        }
+
+        Assert.Equal(MountState.Stopped, mount.State);
+        Assert.False(mount.CallbacksRooted);
+        Assert.Equal(1, fake.Calls.Count(call => call == "disconnect"));
+    }
+
+    [Fact]
+    public async Task Dispose_StalledNativeHydration_ReportsPhaseAndAllowsRetry()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        var fake = new FakeMountOperations(
+            retainCallbacks: false,
+            hydrateStarted: new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            ),
+            releaseHydrate: new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            )
+        );
+        var logger = new RecordingLogger();
+        var mount = new CloudMount(
+            new CloudMountOptions
+            {
+                Root = BaseRoot,
+                Container = new ZipContainer(_ => File.OpenRead(Source)),
+                ShutdownTimeout = TimeSpan.FromMilliseconds(200),
+            },
+            fake,
+            logger
+        );
+        await mount.MountAsync(token);
+        Task hydration = mount.HydrateAsync("docs/one.txt", token);
+        try
+        {
+            await fake.HydrateStarted!.Task.WaitAsync(TimeSpan.FromSeconds(5), token);
+
+            TimeoutException error = await Assert.ThrowsAsync<TimeoutException>(() =>
+                mount.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), token)
+            );
+            Assert.Contains("explicit hydrations", error.Message);
+            Assert.Equal(MountState.Faulted, mount.State);
+            Assert.True(mount.CallbacksRooted);
+            Assert.DoesNotContain("disconnect", fake.Calls);
+            Assert.Contains(
+                logger.Entries,
+                item => item.Level == LogLevel.Warning && item.Exception is TimeoutException
+            );
+        }
+        finally
+        {
+            fake.ReleaseHydrate!.TrySetResult();
+            await mount.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), token);
+        }
+
+        try
+        {
+            await hydration;
+        }
+        catch (OperationCanceledException)
+        {
+            // The caller may observe shutdown cancellation after the native call.
+        }
+
+        Assert.Equal(MountState.Stopped, mount.State);
+        Assert.False(mount.CallbacksRooted);
+        Assert.Equal(1, fake.Calls.Count(call => call == "disconnect"));
+    }
+
+    private static unsafe void SimulateFetch(FakeMountOperations fake)
+    {
+        byte[] identity = Encoding.UTF8.GetBytes("docs/one.txt");
+        fixed (byte* identityPointer = identity)
+        {
+            var info = new CF_CALLBACK_INFO
+            {
+                StructSize = (uint)Marshal.SizeOf<CF_CALLBACK_INFO>(),
+                FileIdentity = identityPointer,
+                FileIdentityLength = (uint)identity.Length,
+                FileSize = 7,
+                ConnectionKey = (CF_CONNECTION_KEY)1,
+                TransferKey = 2,
+                RequestKey = 3,
+            };
+            var parameters = new CF_CALLBACK_PARAMETERS
+            {
+                ParamSize = (uint)(
+                    sizeof(uint)
+                    + sizeof(CF_CALLBACK_PARAMETERS._Anonymous_e__Union._FetchData_e__Struct)
+                ),
+            };
+            parameters.FetchData.RequiredFileOffset = 0;
+            parameters.FetchData.RequiredLength = 7;
+            fake.Callbacks![0].Callback(&info, &parameters);
+        }
     }
 
     [Fact]
@@ -1186,6 +1355,35 @@ public sealed class CloudMountTransactionTests : IDisposable
         : IProgress<OperationProgress>
     {
         public void Report(OperationProgress value) => report(value);
+    }
+
+    private sealed class StalledReadStream : MemoryStream
+    {
+        private readonly TaskCompletionSource _entered = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        private readonly TaskCompletionSource _released = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+
+        public StalledReadStream()
+            : base(Encoding.UTF8.GetBytes("content")) { }
+
+        public Task ReadEntered => _entered.Task;
+
+        public void Release() => _released.TrySetResult();
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default
+        )
+        {
+            _entered.TrySetResult();
+            // Deliberately ignore the canceled transport token to exercise
+            // the provider-stall shutdown behavior without native CFAPI I/O.
+            await _released.Task.ConfigureAwait(false);
+            return await base.ReadAsync(buffer, CancellationToken.None).ConfigureAwait(false);
+        }
     }
 
     private sealed class RecordingLogger : ILogger<CloudMount>

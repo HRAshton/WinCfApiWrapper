@@ -61,7 +61,7 @@ For a controlled immutable source, `new ZipContainer(openArchive, limits: null, 
 
 The library checks invalid/reserved Windows names, traversal, conflicting paths, and case-insensitive duplicates. Directory ancestors are derived automatically; explicit directory entries are optional.
 
-`OpenReadAsync(ContainerEntry, CancellationToken)` may run concurrently. Return a **fresh, independent, readable stream positioned at the beginning of the requested file**, for the entry in the original snapshot. It need not be seekable. The mount owns and disposes the returned stream; the caller still owns the container instance. Honor cancellation when possible and do not mutate the listing or underlying bytes during a mount.
+`OpenReadAsync(ContainerEntry, CancellationToken)` may run concurrently. Return a **fresh, independent, readable stream positioned at the beginning of the requested file**, for the entry in the original snapshot. It need not be seekable. The mount owns and disposes the returned stream; the caller still owns the container instance. Honor cancellation and configure finite I/O timeouts; do not mutate the listing or underlying bytes during a mount. An uncooperative provider can stall shutdown. An optional positive `CloudMountOptions.ShutdownTimeout` bounds the time `DisposeAsync` waits to observe fetch workers and explicit hydrations draining. Expiry throws `TimeoutException`, leaves the mount `Faulted`, and keeps its CFAPI connection/callback delegates alive. This does **not** forcibly interrupt the stream: unblock source I/O and retry `DisposeAsync`. By default the timeout is null and shutdown waits indefinitely.
 
 ## Minimal in-memory example
 

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -93,6 +94,20 @@ internal sealed class CloudMount : ICloudMount
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 "Concurrency and capacity must be positive."
+            );
+        }
+
+        if (
+            options.ShutdownTimeout is { } shutdownTimeout
+            && (
+                shutdownTimeout <= TimeSpan.Zero
+                || shutdownTimeout > TimeSpan.FromMilliseconds(uint.MaxValue - 1)
+            )
+        )
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "ShutdownTimeout must be a positive finite wait or null for unlimited."
             );
         }
 
@@ -672,6 +687,10 @@ internal sealed class CloudMount : ICloudMount
 
     private async Task CleanupAsync()
     {
+        // A configured observation deadline spans fetch and explicit-hydration drains.
+        // It does not terminate provider code or authorize an early native disconnect.
+        Stopwatch? elapsed = _options.ShutdownTimeout.HasValue ? Stopwatch.StartNew() : null;
+
         // Prevent new explicit hydrations and allow any already inside CFAPI to finish.
         Task[] active;
         lock (_hydrationLock)
@@ -684,11 +703,27 @@ internal sealed class CloudMount : ICloudMount
 
         // Stop transport first: a native hydrate may be waiting on a fetch worker.
         if (_coordinator is not null)
-            await _coordinator.DisposeAsync().ConfigureAwait(false);
+        {
+            await AwaitShutdownDrainAsync(
+                _coordinator.DisposeAsync().AsTask(),
+                elapsed,
+                "fetch workers"
+            ).ConfigureAwait(false);
+        }
 
+        Task explicitDrain = Task.WhenAll(active);
         try
         {
-            await Task.WhenAll(active).ConfigureAwait(false);
+            await AwaitShutdownDrainAsync(
+                explicitDrain,
+                elapsed,
+                "explicit hydrations"
+            ).ConfigureAwait(false);
+        }
+        catch (TimeoutException) when (!explicitDrain.IsCompleted)
+        {
+            // Retain connection and callback root while native hydration is pending.
+            throw;
         }
         catch
         {
@@ -705,5 +740,46 @@ internal sealed class CloudMount : ICloudMount
 
         _coordinator = null;
         _catalog = null;
+    }
+
+    private async Task AwaitShutdownDrainAsync(Task drain, Stopwatch? elapsed, string phase)
+    {
+        if (_options.ShutdownTimeout is not { } timeout)
+        {
+            await drain.ConfigureAwait(false);
+            return;
+        }
+
+        TimeSpan remaining = timeout - elapsed!.Elapsed;
+        if (remaining < TimeSpan.Zero)
+            remaining = TimeSpan.Zero;
+
+        try
+        {
+            await drain.WaitAsync(remaining).ConfigureAwait(false);
+        }
+        catch (TimeoutException ex) when (!drain.IsCompleted)
+        {
+            int activeFetches = _coordinator?.Statistics.ActiveFetches ?? 0;
+            int pendingFetches = _coordinator?.PendingRequestCount ?? 0;
+            int activeHydrations;
+            lock (_hydrationLock)
+                activeHydrations = _activeHydrations.Count;
+
+            _logger.LogWarning(
+                ex,
+                "Shutdown wait expired for {Phase}; active fetches {ActiveFetches}, pending fetches {PendingFetches}, active explicit hydrations {ActiveHydrations}. Native connection retained.",
+                phase,
+                activeFetches,
+                pendingFetches,
+                activeHydrations
+            );
+            throw new TimeoutException(
+                $"Shutdown wait expired for {phase}; native connection retained. "
+                    + $"Active fetches: {activeFetches}; pending fetches: {pendingFetches}; "
+                    + $"explicit hydrations: {activeHydrations}.",
+                ex
+            );
+        }
     }
 }
