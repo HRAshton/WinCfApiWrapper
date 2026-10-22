@@ -142,7 +142,7 @@ disposal and does not access a ZIP entry again if its placeholder is already
 hydrated; compare source-open/read counts as a regression guard. Existing
 baseline numbers do **not** prove this change improves throughput or peak
 memory. Retained slot count after many distinct hydrations, and live slot count during
-contention/cancellation, are asserted by the Windows unit suite.
+contention/cancellation are asserted by the Windows unit suite.
 
 **Merge condition:** the after version must reduce retained keyed lock objects
 without material performance regression for hydrate-all, repeated hydrations,
