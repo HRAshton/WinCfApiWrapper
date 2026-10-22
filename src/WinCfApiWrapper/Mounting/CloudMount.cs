@@ -304,13 +304,25 @@ internal sealed class CloudMount : ICloudMount
                     finally
                     {
                         int completed = Interlocked.Increment(ref done);
-                        progress?.Report(
-                            new HydrationProgress(
-                                completed,
-                                paths.Length,
-                                Volatile.Read(ref failed)
-                            )
-                        );
+                        try
+                        {
+                            progress?.Report(
+                                new HydrationProgress(
+                                    completed,
+                                    paths.Length,
+                                    Volatile.Read(ref failed)
+                                )
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            // Observer failures must not interrupt remaining files or
+                            // replace cancellation and per-file hydration errors.
+                            _logger.LogWarning(
+                                ex,
+                                "Bulk hydration progress report failed synchronously"
+                            );
+                        }
                     }
                 }
             )

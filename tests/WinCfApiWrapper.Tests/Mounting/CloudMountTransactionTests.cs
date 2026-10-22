@@ -603,6 +603,113 @@ public sealed class CloudMountTransactionTests : IDisposable
     }
 
     [Fact]
+    public async Task HydrateAll_SynchronouslyThrowingProgress_DoesNotInterruptOtherFiles()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        var logger = new RecordingLogger();
+        var fake = new FakeMountOperations();
+        await using var mount = new CloudMount(
+            new CloudMountOptions
+            {
+                Root = BaseRoot,
+                Container = new ZipContainer(_ => File.OpenRead(Source)),
+                BulkHydrationConcurrency = 1,
+            },
+            fake,
+            logger
+        );
+        await mount.MountAsync(token);
+        var progress = new ThrowingHydrationProgress();
+
+        await mount.HydrateAllAsync(progress, token);
+
+        Assert.Equal(2, fake.Calls.Count(call => call == "hydrate"));
+        Assert.Equal(2, progress.Reports);
+        Assert.Equal(
+            2,
+            logger.Entries.Count(entry =>
+                entry.Level == LogLevel.Warning
+                && entry.Exception is InvalidOperationException
+            )
+        );
+    }
+
+    [Fact]
+    public async Task HydrateAll_ThrowingProgress_DoesNotMaskFileFailures()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        var logger = new RecordingLogger();
+        var fake = new FakeMountOperations(name =>
+        {
+            if (name == "hydrate")
+                throw new IOException("read failed");
+        });
+        await using var mount = new CloudMount(
+            new CloudMountOptions
+            {
+                Root = BaseRoot,
+                Container = new ZipContainer(_ => File.OpenRead(Source)),
+                BulkHydrationConcurrency = 1,
+            },
+            fake,
+            logger
+        );
+        await mount.MountAsync(token);
+        var progress = new ThrowingHydrationProgress();
+
+        AggregateException error = await Assert.ThrowsAsync<AggregateException>(() =>
+            mount.HydrateAllAsync(progress, token)
+        );
+
+        Assert.Equal(2, error.InnerExceptions.Count);
+        Assert.All(
+            error.InnerExceptions,
+            exception => Assert.Contains("read failed", exception.InnerException?.Message)
+        );
+        Assert.Equal(2, progress.Reports);
+        Assert.Equal(
+            2,
+            logger.Entries.Count(entry =>
+                entry.Level == LogLevel.Warning
+                && entry.Exception is InvalidOperationException
+            )
+        );
+    }
+
+    [Fact]
+    public async Task HydrateAll_ThrowingProgress_DoesNotMaskCancellation()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        using var canceledByHydration = new CancellationTokenSource();
+        var logger = new RecordingLogger();
+        var fake = new FakeMountOperations(afterHydrate: canceledByHydration.Cancel);
+        await using var mount = new CloudMount(
+            new CloudMountOptions
+            {
+                Root = BaseRoot,
+                Container = new ZipContainer(_ => File.OpenRead(Source)),
+                BulkHydrationConcurrency = 1,
+            },
+            fake,
+            logger
+        );
+        await mount.MountAsync(token);
+        var progress = new ThrowingHydrationProgress();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            mount.HydrateAllAsync(progress, canceledByHydration.Token)
+        );
+
+        Assert.True(progress.Reports > 0);
+        Assert.Contains(
+            logger.Entries,
+            entry =>
+                entry.Level == LogLevel.Warning
+                && entry.Exception is InvalidOperationException
+        );
+    }
+
+    [Fact]
     public async Task Mount_PublicOperations_RequireActiveMountAndKnownFile()
     {
         CancellationToken testCancellationToken = TestContext.Current.CancellationToken;
@@ -1100,6 +1207,19 @@ public sealed class CloudMountTransactionTests : IDisposable
         )
         {
             Entries.Add((logLevel, exception));
+        }
+    }
+
+    private sealed class ThrowingHydrationProgress : IProgress<HydrationProgress>
+    {
+        private int _reports;
+
+        public int Reports => Volatile.Read(ref _reports);
+
+        public void Report(HydrationProgress value)
+        {
+            Interlocked.Increment(ref _reports);
+            throw new InvalidOperationException("UI progress observer failed");
         }
     }
 
