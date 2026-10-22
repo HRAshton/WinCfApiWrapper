@@ -38,29 +38,29 @@ dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net10.0
 dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net10.0-windows -- --archive C:\artifacts\installer.zip --random-reads 128 --output artifact.json
 ```
 
-The benchmark creates a GUID-named scratch directory below \`--work-parent\` (default: \`%TEMP%\WinCfApiWrapper.Benchmarks\`). It unregisters and deletes **only its own** mount folders, never the supplied archive or an existing directory. Run benchmarks sequentially; they manipulate real native sync roots. On failed cleanup, inspect and remove the **dedicated benchmark folder** manually.
+The benchmark creates a GUID-named scratch directory below `--work-parent` (default: `%TEMP%\WinCfApiWrapper.Benchmarks`). It unregisters and deletes **only its own** mount folders, never the supplied archive or an existing directory. Run benchmarks sequentially; they manipulate real native sync roots. On failed cleanup, inspect and remove the **dedicated benchmark folder** manually.
 
-For real HTTP range-source tests, pass both \`--archive\` (the local **identical** ZIP used to define the fixture) and \`--http-url\` (an endpoint returning valid 206 ranges and a stable ETag/Last-Modified):
+For real HTTP range-source tests, pass both `--archive` (the local **identical** ZIP used to define the fixture) and `--http-url` (an endpoint returning valid 206 ranges and a stable ETag/Last-Modified):
 
 ```powershell
 dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net10.0-windows -- --archive C:\artifacts\installer.zip --http-url https://example.invalid/installer.zip --output http.json
 ```
 
-\`example.invalid\` is deliberately nonfunctional. Supply your actual server and keep the source unchanged during the run.
+`example.invalid` is deliberately nonfunctional. Supply your actual server and keep the source unchanged during the run.
 
 ## Recorded phases
 
 | Phase | What is timed |
 | --- | --- |
-| \`zip-index-only\` | First index on a separate container (does not prime cold mount). |
-| \`cold-mount\` | Fresh index, register/connect, create placeholders. |
-| \`random-file-reads\` | Deterministic, seeded 4 KiB reads of native placeholder paths. |
-| \`hydrate-all\` | Explicit hydration, including any files already hydrated by reads. |
-| \`dispose-cold\` | Disconnect the cold mount. |
-| \`warm-resume-same-container\` | Reconnect using the previously indexed container. |
-| \`dispose-same-container\` | Disconnect the reused mount. |
-| \`warm-resume-new-container\` | Rebuild index using a new container and reconnect. |
-| \`dispose-new-container\` | Disconnect the final mount. |
+| `zip-index-only` | First index on a separate container (does not prime cold mount). |
+| `cold-mount` | Fresh index, register/connect, create placeholders. |
+| `random-file-reads` | Deterministic, seeded 4 KiB reads of native placeholder paths. |
+| `hydrate-all` | Explicit hydration, including any files already hydrated by reads. |
+| `dispose-cold` | Disconnect the cold mount. |
+| `warm-resume-same-container` | Reconnect using the previously indexed container. |
+| `dispose-same-container` | Disconnect the reused mount. |
+| `warm-resume-new-container` | Rebuild index using a new container and reconnect. |
+| `dispose-new-container` | Disconnect the final mount. |
 
 For each phase JSON contains elapsed milliseconds, **process-wide** managed allocations, working set delta, **process-lifetime** peak working set, local archive open/read bytes, and HTTP range-request counts/requested bytes. HTTP requested bytes are **not** actual transferred bytes (exclude headers, failed requests and network overhead). Other sources and background tasks may add process-wide allocations. The counters themselves add instrumentation overhead.
 
