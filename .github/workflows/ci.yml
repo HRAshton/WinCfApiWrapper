@@ -102,6 +102,12 @@ jobs:
       - name: Restore native integration test project
         run: dotnet restore tests/WinCfApiWrapper.IntegrationTests/WinCfApiWrapper.IntegrationTests.csproj
 
+      - name: Restore TrustedID benchmark harness
+        run: dotnet restore benchmarks/WinCfApiWrapper.Benchmarks/WinCfApiWrapper.Benchmarks.csproj
+
+      - name: Compile TrustedID benchmark harness (no native execution)
+        run: dotnet build benchmarks/WinCfApiWrapper.Benchmarks/WinCfApiWrapper.Benchmarks.csproj --framework ${{ matrix.framework }} --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+
       - name: Build unit tests and library
         run: dotnet build tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj --framework ${{ matrix.framework }} --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
 
