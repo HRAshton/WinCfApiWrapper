@@ -472,7 +472,8 @@ public sealed class CloudMountTransactionTests : IDisposable
     public async Task Dispose_StalledFetch_RetainsNativeCallbacksUntilWorkerDrains()
     {
         CancellationToken token = TestContext.Current.CancellationToken;
-        var fake = new FakeMountOperations(retainCallbacks: false);
+        // This test invokes the registered callback through the fake adapter.
+        var fake = new FakeMountOperations(retainCallbacks: true);
         var logger = new RecordingLogger();
         var stalled = new StalledReadStream();
         var mount = new CloudMount(
