@@ -55,10 +55,54 @@ public sealed class HydrationTests
     }
 
     [Fact]
-    public async Task NativeFetchCallbacks_RemainAliveUnderForcedGarbageCollection()
+    public async Task NativeFetchCallbacks_SurviveOrphanedMountDuringNativeFetch()
     {
         CancellationToken token = TestContext.Current.CancellationToken;
-        string root = FixtureArchive.Root();
+        (string root, WeakReference<CloudMount> weakMount) = await OpenOrphanedMountAsync(token);
+        try
+        {
+            // The helper has returned: the caller owns only a root path and a weak reference.
+            // A fresh GUID mount has not had its placeholders hydrated by this test.
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+
+            // Resolve the path without recovering the CloudMount instance first.
+            // This read must dispatch a real CFAPI FETCH_DATA callback after the GC.
+            string file = Path.Combine(root, "docs", "hello.txt");
+            Assert.Equal(
+                "Hello from a checked-in ZIP fixture!\n",
+                await File.ReadAllTextAsync(file, token)
+            );
+
+            CloudMount recovered = Assert.IsType<CloudMount>(
+                weakMount.TryGetTarget(out CloudMount? target) ? target : null
+            );
+            Assert.True(recovered.CallbacksRooted);
+            Assert.True(recovered.Statistics.FetchAttempts > 0);
+            Assert.True(recovered.Statistics.BytesTransferred > 0);
+            Assert.Equal(0, recovered.Statistics.FailedFetches);
+        }
+        finally
+        {
+            // If the owner was collected, it cannot be safely disconnected; preserve the
+            // directory for diagnosis rather than unregistering a potentially live root.
+            if (weakMount.TryGetTarget(out CloudMount? owner))
+            {
+                await owner.DisposeAsync();
+                Assert.False(owner.CallbacksRooted);
+                new SyncRootManager(NullLogger<SyncRootManager>.Instance).Unregister(root);
+            }
+        }
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(
+        System.Runtime.CompilerServices.MethodImplOptions.NoInlining
+    )]
+    private static async Task<(string Root, WeakReference<CloudMount> Mount)> OpenOrphanedMountAsync(
+        CancellationToken token
+    )
+    {
         var mount = new CloudMount(
             new CloudMountOptions
             {
@@ -66,35 +110,21 @@ public sealed class HydrationTests
                     _ => File.OpenRead(FixtureArchive.LocalPath),
                     validateEntryMetadata: false
                 ),
-                Root = root,
+                Root = FixtureArchive.Root(),
                 TrustedContentId = "a11ce123",
                 SkipResumeValidation = true,
             }
         );
-        bool mounted = false;
+
         try
         {
             await mount.MountAsync(token);
-            mounted = true;
-            Assert.True(mount.CallbacksRooted);
-
-            for (int i = 0; i < 6; i++)
-            {
-                GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
-                GC.WaitForPendingFinalizers();
-                string name = i % 2 == 0 ? "docs/hello.txt" : "docs/nested/info.txt";
-                string expected = i % 2 == 0
-                    ? "Hello from a checked-in ZIP fixture!\n"
-                    : "Nested content\n";
-                Assert.Equal(expected, await File.ReadAllTextAsync(mount.Resolve(name), token));
-            }
+            return (mount.Root, new WeakReference<CloudMount>(mount));
         }
-        finally
+        catch
         {
             await mount.DisposeAsync();
-            Assert.False(mount.CallbacksRooted);
-            if (mounted)
-                new SyncRootManager(NullLogger<SyncRootManager>.Instance).Unregister(mount.Root);
+            throw;
         }
     }
 
