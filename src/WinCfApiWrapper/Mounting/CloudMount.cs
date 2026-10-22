@@ -557,7 +557,7 @@ internal sealed class CloudMount : ICloudMount
         {
             try
             {
-                MountCleanup.Delete(Root, _operations, _registrationFailed);
+                MountCleanup.Delete(Root, _operations, _registrationFailed, createdByThisAttempt: true);
             }
             catch (Exception ex)
             {

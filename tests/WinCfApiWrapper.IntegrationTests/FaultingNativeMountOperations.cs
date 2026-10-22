@@ -60,6 +60,11 @@ internal sealed class FaultingNativeMountOperations : IMountOperations
         return _native.IsRegistered(root);
     }
 
+    public bool IsOwnedSyncRoot(string root)
+    {
+        return _native.IsOwnedSyncRoot(root);
+    }
+
     public Task HydrateAsync(SafeFileHandle handle, CancellationToken cancellationToken)
     {
         return _native.HydrateAsync(handle, cancellationToken);

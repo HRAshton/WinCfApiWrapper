@@ -137,6 +137,44 @@ internal sealed class NativeMountOperations : IMountOperations
         return IsSyncRootRegistered(root);
     }
 
+    // CF_SYNC_ROOT_INFO_PROVIDER is fixed-size: status + 256 UTF-16 name
+    // characters + 256 UTF-16 version characters. Never used by fetch/mount.
+    [DllImport("CldApi.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int CfGetSyncRootInfoByPath(
+        string filePath,
+        int infoClass,
+        nint infoBuffer,
+        uint infoBufferLength,
+        nint returnedLength
+    );
+
+    public unsafe bool IsOwnedSyncRoot(string root)
+    {
+        const int nameChars = 256;
+        const int infoBytes = sizeof(uint) + nameChars * sizeof(char) * 2;
+        Span<byte> bytes = stackalloc byte[infoBytes];
+        fixed (byte* buffer = bytes)
+        {
+            int result = CfGetSyncRootInfoByPath(
+                root,
+                2, // CF_SYNC_ROOT_INFO_PROVIDER
+                (nint)buffer,
+                infoBytes,
+                nint.Zero
+            );
+            if (result < 0)
+                throw new IOException(
+                    $"Cannot validate sync root provider: {root}",
+                    new COMException("CfGetSyncRootInfoByPath failed.", result)
+                );
+
+            ReadOnlySpan<char> name = new((char*)(buffer + sizeof(uint)), nameChars);
+            int terminator = name.IndexOf('\0');
+            return terminator >= 0
+                && name[..terminator].SequenceEqual("WinCfApiWrapper");
+        }
+    }
+
     public async Task HydrateAsync(SafeFileHandle handle, CancellationToken cancellationToken)
     {
         await using var stream = new FileStream(handle, FileAccess.Read, 64 * 1024, true);

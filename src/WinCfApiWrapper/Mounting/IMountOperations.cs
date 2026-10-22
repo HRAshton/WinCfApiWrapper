@@ -58,6 +58,12 @@ internal interface IMountOperations
     bool IsRegistered(string root);
 
     /// <summary>
+    /// Verifies the registered root is attributed to this Cloud Files provider.
+    /// Called during explicit cleanup only; a suffix alone is not ownership evidence.
+    /// </summary>
+    bool IsOwnedSyncRoot(string root);
+
+    /// <summary>
     /// Hydrates the contents associated with a file handle.
     /// </summary>
     /// <param name="handle">The file handle to hydrate.</param>

@@ -41,7 +41,7 @@ public sealed class MountPathTests
             Directory.CreateDirectory(oldRoot);
             File.WriteAllText(Path.Combine(oldRoot, "keep.txt"), "old");
             Assert.True(MountPath.IsMount(oldRoot));
-            MountCleanup.Delete(oldRoot, new FakeMountOperations());
+            MountCleanup.Delete(oldRoot, new FakeMountOperations(registered: true));
             Assert.False(Directory.Exists(oldRoot));
         }
         finally
@@ -83,6 +83,397 @@ public sealed class MountPathTests
         Assert.NotEqual(rootA, rootB);
         Assert.True(MountPath.IsMount(rootA));
         Assert.True(MountPath.IsMount(rootB));
+    }
+
+    [Fact]
+    public void Cleanup_TrailingSeparator_RetainsSiblingMarkerOnFailureAndRemovesOnRetry()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string root = Path.Combine(parent, "mount.rzm-1234abcd");
+        string withSeparator = root + Path.DirectorySeparatorChar;
+        string sibling = root + ".wincfapiwrapper-pending-cleanup";
+        Directory.CreateDirectory(root);
+        var fake = new FakeMountOperations(
+            fault: step =>
+            {
+                if (step == "unregister")
+                    throw new IOException("injected unregister failure");
+            },
+            registered: true
+        );
+        try
+        {
+            Assert.Throws<IOException>(() => MountCleanup.Delete(withSeparator, fake));
+            Assert.True(Directory.Exists(root));
+            Assert.True(File.Exists(sibling));
+            Assert.False(File.Exists(Path.Combine(root, ".wincfapiwrapper-pending-cleanup")));
+
+            fake.Fault = null;
+            MountCleanup.Delete(withSeparator, fake);
+
+            Assert.False(Directory.Exists(root));
+            Assert.False(File.Exists(sibling));
+            Assert.False(fake.Registered);
+        }
+        finally
+        {
+            if (Directory.Exists(parent))
+                Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_AlreadyRemovedRoot_AlsoRemovesValidSiblingMarker()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(parent);
+        try
+        {
+            string root = Path.Combine(parent, "removed.rzm-1234abcd");
+            string marker = root + ".wincfapiwrapper-pending-cleanup";
+            File.WriteAllText(marker, "WinCfApiWrapper cleanup v1");
+
+            MountCleanup.Delete(root, new FakeMountOperations());
+            Assert.False(File.Exists(marker));
+            Assert.False(Directory.Exists(root));
+        }
+        finally
+        {
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_MissingParent_RemainsIdempotent()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N"),
+            "missing.rzm-v2-" + new string('a', 32)
+        );
+        MountCleanup.Delete(root, new FakeMountOperations());
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Fact]
+    public void Cleanup_RejectsParentJunctionBeforeUnregistration()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string target = Path.Combine(parent, "actual-parent");
+        string redirectedParent = Path.Combine(parent, "redirected-parent");
+        string root = Path.Combine(redirectedParent, "mount.rzm-1234abcd");
+        Directory.CreateDirectory(target);
+        Directory.CreateDirectory(Path.Combine(target, "mount.rzm-1234abcd"));
+        File.WriteAllText(Path.Combine(target, "mount.rzm-1234abcd", "keep.txt"), "keep");
+        try
+        {
+            CreateJunction(redirectedParent, target);
+            var fake = new FakeMountOperations(registered: true);
+
+            Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.Throws<IOException>(() =>
+                MountCleanup.Delete(root + Path.DirectorySeparatorChar, fake)
+            );
+            Assert.DoesNotContain("unregister", fake.Calls);
+            Assert.Equal("keep", File.ReadAllText(Path.Combine(root, "keep.txt")));
+        }
+        finally
+        {
+            if (Directory.Exists(redirectedParent))
+                Directory.Delete(redirectedParent);
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Cleanup_RejectsUnrecognizedSiblingMarkerBeforeUnregistration(bool directoryMarker)
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string root = Path.Combine(parent, "mount.rzm-1234abcd");
+        string marker = root + ".wincfapiwrapper-pending-cleanup";
+        Directory.CreateDirectory(root);
+        if (directoryMarker)
+            Directory.CreateDirectory(marker);
+        else
+            File.WriteAllText(marker, "some other owner");
+        try
+        {
+            var fake = new FakeMountOperations(registered: true);
+
+            IOException error = Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.Contains("Unrecognized cleanup marker", error.Message);
+            Assert.True(fake.Registered);
+            Assert.DoesNotContain("unregister", fake.Calls);
+            Assert.True(Directory.Exists(root));
+        }
+        finally
+        {
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_RejectsUnregisteredRootWithDirectoryMarker()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string root = Path.Combine(parent, "mount.rzm-1234abcd");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(root + ".wincfapiwrapper-pending-cleanup");
+        try
+        {
+            var fake = new FakeMountOperations();
+            Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.DoesNotContain("unregister", fake.Calls);
+            Assert.True(Directory.Exists(root));
+        }
+        finally
+        {
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_RejectsRootSwappedToJunctionDuringOwnershipCheck()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string root = Path.Combine(parent, "mount.rzm-1234abcd");
+        string moved = Path.Combine(parent, "original");
+        string target = Path.Combine(parent, "outside");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(target, "keep.txt"), "untouched");
+        try
+        {
+            var fake = new FakeMountOperations(
+                fault: step =>
+                {
+                    if (step == "check-owner")
+                    {
+                        Directory.Move(root, moved);
+                        CreateJunction(root, target);
+                    }
+                },
+                registered: true
+            );
+
+            IOException error = Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.Contains("changed during ownership validation", error.Message);
+            Assert.DoesNotContain("unregister", fake.Calls);
+            Assert.True(Directory.Exists(moved));
+            Assert.Equal("untouched", File.ReadAllText(Path.Combine(target, "keep.txt")));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root);
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_RefusesUnregisteredForeignFolderWithMatchingSuffix()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N"),
+            "foreign.rzm-1234abcd"
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            string importantFile = Path.Combine(root, "keep.txt");
+            File.WriteAllText(importantFile, "foreign data");
+            var fake = new FakeMountOperations();
+
+            IOException error = Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.Contains("ownership evidence", error.Message);
+            Assert.Equal("foreign data", File.ReadAllText(importantFile));
+            Assert.DoesNotContain("unregister", fake.Calls);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(root)!, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_RejectsRegistrationBelongingToAnotherProvider()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string root = Path.Combine(parent, "foreign.rzm-1234abcd");
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "keep.txt"), "foreign");
+            var fake = new FakeMountOperations(registered: true)
+            {
+                OwnsRegistration = false,
+            };
+
+            Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.True(fake.Registered);
+            Assert.DoesNotContain("unregister", fake.Calls);
+            Assert.True(File.Exists(Path.Combine(root, "keep.txt")));
+        }
+        finally
+        {
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_RejectsNestedDirectoryJunctionWithoutTouchingTarget()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string root = Path.Combine(parent, "mount.rzm-1234abcd");
+        string outside = Path.Combine(parent, "outside");
+        string junction = Path.Combine(root, "link");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "keep.txt"), "outside");
+        try
+        {
+            CreateJunction(junction, outside);
+            var fake = new FakeMountOperations(registered: true);
+
+            IOException error = Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+            Assert.Contains("reparse point", error.Message);
+            Assert.Equal("outside", File.ReadAllText(Path.Combine(outside, "keep.txt")));
+            Assert.True(fake.Registered);
+            Assert.DoesNotContain("unregister", fake.Calls);
+        }
+        finally
+        {
+            if (Directory.Exists(junction))
+                Directory.Delete(junction);
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_RejectsRootJunctionWithoutTouchingTarget()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string target = Path.Combine(parent, "target");
+        string junction = Path.Combine(parent, "fake.rzm-1234abcd");
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(target, "keep.txt"), "outside");
+        try
+        {
+            CreateJunction(junction, target);
+            var fake = new FakeMountOperations(registered: true);
+
+            Assert.Throws<IOException>(() => MountCleanup.Delete(junction, fake));
+            Assert.True(File.Exists(Path.Combine(target, "keep.txt")));
+            Assert.DoesNotContain("unregister", fake.Calls);
+        }
+        finally
+        {
+            if (Directory.Exists(junction))
+                Directory.Delete(junction);
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_PathSwappedToJunctionDuringUnregister_FailsBeforeDeletion()
+    {
+        string parent = Path.Combine(
+            Path.GetTempPath(),
+            "WinCfApiWrapper.Unit",
+            Guid.NewGuid().ToString("N")
+        );
+        string root = Path.Combine(parent, "mount.rzm-1234abcd");
+        string displaced = Path.Combine(parent, "original");
+        string outside = Path.Combine(parent, "outside");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "keep.txt"), "outside");
+        try
+        {
+            var fake = new FakeMountOperations(
+                fault: step =>
+                {
+                    if (step == "unregister")
+                    {
+                        Directory.Move(root, displaced);
+                        CreateJunction(root, outside);
+                    }
+                },
+                registered: true
+            );
+            Assert.Throws<IOException>(() => MountCleanup.Delete(root, fake));
+
+            Assert.Equal("outside", File.ReadAllText(Path.Combine(outside, "keep.txt")));
+            Assert.True(Directory.Exists(displaced));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root);
+            Directory.Delete(parent, true);
+        }
+    }
+
+    private static void CreateJunction(string link, string target)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+        {
+            Arguments = $"/d /c mklink /J \"{link}\" \"{target}\"",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        using System.Diagnostics.Process process = System.Diagnostics.Process.Start(start)!;
+        try
+        {
+            Assert.True(process.WaitForExit(5000), "Creating directory junction timed out.");
+            Assert.Equal(0, process.ExitCode);
+        }
+        finally
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
     }
 
     [Fact]
