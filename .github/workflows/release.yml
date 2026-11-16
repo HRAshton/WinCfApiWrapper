@@ -32,10 +32,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up .NET 10 SDK
+      - name: Set up selected .NET SDK and tool runtime
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Resolve release transaction
         id: release
@@ -78,10 +79,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up .NET 10 SDK
+      - name: Set up selected .NET SDK and tool runtime
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Download exact attested build output
         if: needs.resolve.outputs.build == 'true'

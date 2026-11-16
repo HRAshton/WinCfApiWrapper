@@ -25,7 +25,7 @@ var options = new CloudMountOptions
 
 ## Running on Windows
 
-Use Windows 10 version 1709+ with Cloud Files support, NTFS, an account permitted to register sync roots, .NET 10 SDK and .NET 8/10 runtimes.
+Use Windows 10 version 1709+ with Cloud Files support, NTFS, an account permitted to register sync roots, .NET SDK specified by `global.json` and .NET 8/10 runtimes.
 
 ```powershell
 dotnet run --project benchmarks/WinCfApiWrapper.Benchmarks -c Release -f net8.0-windows -- --entries 10000 --bytes-per-file 1024 --random-reads 128 --output baseline-net8.json
