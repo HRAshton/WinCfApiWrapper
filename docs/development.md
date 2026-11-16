@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Windows x64, Windows 10 version 1709 (build 16299) or later with Cloud Files API support.
-- .NET 10 SDK (see `global.json`) and the .NET 8 and .NET 10 runtimes.
+- .NET SDK specified by `global.json` and the .NET 8 and .NET 10 runtimes.
 - Permissions to register Cloud Files sync roots for native integration tests.
 - PowerShell for release-script self-tests and optional GitHub CLI (`gh`) for release verification.
 

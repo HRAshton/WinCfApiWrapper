@@ -20,6 +20,7 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
+          global-json-file: global.json
 
       # External download test is deliberately opt-in outside release.
       - name: Run live E2E tests

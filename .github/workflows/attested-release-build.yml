@@ -52,12 +52,13 @@ jobs:
             throw 'Checked-out source does not match the resolved release commit'
           }
 
-      - name: Set up .NET 10 SDK and test runtimes
+      - name: Set up selected .NET SDK and test runtimes
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: |
             8.0.x
             10.0.x
+          global-json-file: global.json
 
       - name: Restore unit tests and library
         run: dotnet restore tests/WinCfApiWrapper.Tests/WinCfApiWrapper.Tests.csproj
